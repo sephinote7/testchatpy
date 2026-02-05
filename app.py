@@ -7,7 +7,7 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -68,6 +68,7 @@ class SummarizeTextRequest(BaseModel):
 class SummarizeResponse(BaseModel):
     transcript: str | None = None
     summary: str
+    msg_data: list | None = None  # 채팅 로그 그대로 반환 (Supabase 저장용)
 
 
 @app.get("/")
@@ -76,54 +77,75 @@ async def root():
 
 
 @app.post("/api/summarize", response_model=SummarizeResponse)
-async def summarize_audio(audio: UploadFile = File(...)):
+async def summarize_audio(
+    audio: UploadFile = File(None),
+    msg_data: str | None = Form(None),
+):
     """
-    음성/영상 파일을 받아 Gemini로 STT 후 요약합니다.
-    지원 형식: webm, mp3, mp4, wav, ogg 등
+    음성/영상 파일 + 선택적 채팅 로그를 받아 Gemini STT 후 통합 요약합니다.
+    - audio: 녹음 파일 (webm, mp3, wav 등)
+    - msg_data: JSON 문자열, 채팅 메시지 배열 [{ from, text, time }, ...]
+    STT 결과와 채팅을 합쳐 요약하며, 요약 실패 시에도 transcript·msg_data는 반환합니다.
     """
     client = get_client()
-    suffix = ".webm"
-    if audio.filename and "." in audio.filename:
-        suffix = "." + audio.filename.rsplit(".", 1)[-1].lower()
-    mime_type = MIME_MAP.get(suffix, "video/webm")
-
-    content = await audio.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="빈 파일입니다.")
-
-    # 20MB 초과 시 Files API 사용 권장 (여기서는 인라인으로 처리)
-    try:
-        audio_part = types.Part.from_bytes(data=content, mime_type=mime_type)
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"지원하지 않는 형식이거나 파일이 너무 큽니다. (Gemini 인라인 제한 20MB) {e!s}",
-        ) from e
-
     transcript = ""
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[
-                "이 음성/영상의 말을 그대로 텍스트로 옮겨 주세요. 한국어면 한국어로, 영어면 영어로 적어 주세요. 말이 없으면 빈 문자열만 반환해 주세요.",
-                audio_part,
-            ],
-        )
-        transcript = (response.text or "").strip()
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Gemini STT 처리 실패: {e!s}",
-        ) from e
+    chat_messages: list = []
 
-    if not transcript:
-        return SummarizeResponse(
-            transcript=transcript or None,
-            summary="(녹음 내용이 없거나 인식되지 않았습니다.)",
-        )
+    if msg_data:
+        try:
+            import json
+            chat_messages = json.loads(msg_data)
+            if not isinstance(chat_messages, list):
+                chat_messages = []
+        except Exception:
+            chat_messages = []
 
-    summary = _summarize_text(client, transcript)
-    return SummarizeResponse(transcript=transcript, summary=summary)
+    if audio and audio.filename:
+        suffix = "." + audio.filename.rsplit(".", 1)[-1].lower() if "." in audio.filename else ".webm"
+        mime_type = MIME_MAP.get(suffix, "video/webm")
+        content = await audio.read()
+        if content:
+            try:
+                audio_part = types.Part.from_bytes(data=content, mime_type=mime_type)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"지원하지 않는 형식이거나 파일이 너무 큽니다. (20MB 제한) {e!s}",
+                ) from e
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=[
+                        "이 음성/영상의 말을 그대로 텍스트로 옮겨 주세요. 한국어면 한국어로, 영어면 영어로 적어 주세요. 말이 없으면 빈 문자열만 반환해 주세요.",
+                        audio_part,
+                    ],
+                )
+                transcript = (response.text or "").strip()
+            except Exception as e:
+                pass  # STT 실패해도 채팅만으로 요약 시도
+
+    combined_text = transcript
+    if chat_messages:
+        chat_lines = [
+            f"{m.get('from', '?')}: {m.get('text', '')}"
+            for m in chat_messages
+            if isinstance(m, dict) and m.get("text")
+        ]
+        if chat_lines:
+            combined_text = (combined_text + "\n\n[채팅 로그]\n" + "\n".join(chat_lines)) if combined_text else "\n".join(chat_lines)
+
+    summary = "(녹음·채팅 내용이 없거나 인식되지 않았습니다.)"
+    if combined_text.strip():
+        try:
+            summary = _summarize_text(client, combined_text)
+        except Exception:
+            summary = "(요약 생성 중 오류가 발생했습니다. 채팅 로그는 저장해 두세요.)"
+
+    return SummarizeResponse(
+        transcript=transcript or None,
+        summary=summary,
+        msg_data=chat_messages if chat_messages else None,
+    )
 
 
 @app.post("/api/summarize-text", response_model=SummarizeResponse)
