@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from openai import OpenAI
 
-
+# 1. OpenAI 클라이언트 설정
 def get_openai_client() -> OpenAI:
     key = os.environ.get("OPENAI_API_KEY")
     if not key:
@@ -19,14 +19,13 @@ def get_openai_client() -> OpenAI:
         )
     return OpenAI(api_key=key)
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
 
-
 app = FastAPI(title="화상채팅 음성 요약 API", lifespan=lifespan)
 
+# CORS 설정
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -35,16 +34,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 class SummarizeTextRequest(BaseModel):
     text: str
-
 
 class SummarizeResponse(BaseModel):
     transcript: str | None = None
     summary: str
     msg_data: list | None = None
-
 
 @app.get("/")
 async def root():
@@ -53,7 +49,6 @@ async def root():
         "stt_engine": "whisper-1",
         "summary_engine": "gpt-4o-mini",
     }
-
 
 @app.post("/api/summarize", response_model=SummarizeResponse)
 async def summarize_audio(
@@ -76,44 +71,45 @@ async def summarize_audio(
         content = await audio.read()
         if content:
             try:
+                # 메모리 내에서 파일 객체 생성
                 bio = io.BytesIO(content)
                 bio.name = audio.filename or "audio.webm"
-                print(
-                    f\"Whisper STT 요청: {audio.filename}, 크기: {len(content)} bytes\"
-                )
+                
+                print(f"Whisper STT 요청: {bio.name}, 크기: {len(content)} bytes")
+                
                 tr = client.audio.transcriptions.create(
-                    model=\"whisper-1\",
+                    model="whisper-1",
                     file=bio,
                 )
-                transcript = (tr.text or \"\").strip()
-                print(f\"Whisper STT 결과 샘플: {transcript[:50]}...\")
+                transcript = (tr.text or "").strip()
+                print(f"Whisper STT 결과 샘플: {transcript[:50]}...")
             except Exception as e:
-                print(f\"Whisper STT 오류: {e}\")
-                transcript = \"\"
+                print(f"Whisper STT 오류: {e}")
+                transcript = ""
 
     # 3. 텍스트 통합
-    combined_text = transcript or \"\"
+    combined_text = transcript or ""
     if chat_messages:
         chat_lines = [
-            f\"{m.get('from', '?')}: {m.get('text', '')}\"
+            f"{m.get('from', '?')}: {m.get('text', '')}"
             for m in chat_messages
-            if m.get(\"text\")
+            if m.get("text")
         ]
-        chat_str = \"\\n\".join(chat_lines)
+        chat_str = "\n".join(chat_lines)
         combined_text = (
-            f\"{combined_text}\\n\\n[채팅 로그]\\n{chat_str}\"
+            f"{combined_text}\n\n[채팅 로그]\n{chat_str}"
             if combined_text
             else chat_str
         )
 
     # 4. 최종 요약 생성 (gpt-4o-mini)
-    summary = \"(분석할 내용이 없습니다.)\"
+    summary = "(분석할 내용이 없습니다.)"
     if combined_text.strip():
         try:
             summary = _summarize_with_openai(combined_text)
         except Exception as e:
-            print(f\"Summary Error (OpenAI): {e}\")
-            summary = f\"(요약 중 오류 발생: {str(e)})\"
+            print(f"Summary Error (OpenAI): {e}")
+            summary = f"(요약 중 오류 발생: {str(e)})"
 
     return SummarizeResponse(
         transcript=transcript or None,
@@ -121,38 +117,34 @@ async def summarize_audio(
         msg_data=chat_messages if chat_messages else None,
     )
 
-
-@app.post(\"/api/summarize-text\", response_model=SummarizeResponse)
+@app.post("/api/summarize-text", response_model=SummarizeResponse)
 async def summarize_text_only(body: SummarizeTextRequest):
     summary = _summarize_with_openai(body.text.strip())
     return SummarizeResponse(transcript=body.text, summary=summary)
 
-
 def _summarize_with_openai(text: str) -> str:
     client = get_openai_client()
     prompt = (
-        \"당신은 회의/상담/대화 내용을 정리해 주는 한국어 요약 도우미입니다.\\n\"
-        \"- 핵심만 3~5줄 정도로 요약해 주세요.\\n\"
-        \"- 중요한 결정 사항과 TODO가 있다면 함께 적어 주세요.\\n\\n\"
-        f\"원문:\\n{text}\"
+        "당신은 회의/상담/대화 내용을 정리해 주는 한국어 요약 도우미입니다.\n"
+        "- 핵심만 3~5줄 정도로 요약해 주세요.\n"
+        "- 중요한 결정 사항과 TODO가 있다면 함께 적어 주세요.\n\n"
+        f"원문:\n{text}"
     )
     try:
         resp = client.chat.completions.create(
-            model=\"gpt-4o-mini\",
+            model="gpt-4o-mini",
             messages=[
-                {\"role\": \"system\", \"content\": \"당신은 한국어 요약 전문가입니다.\"},
-                {\"role\": \"user\", \"content\": prompt},
+                {"role": "system", "content": "당신은 한국어 요약 전문가입니다."},
+                {"role": "user", "content": prompt},
             ],
             max_tokens=800,
         )
-        return (resp.choices[0].message.content or \"\").strip()
+        return (resp.choices[0].message.content or "").strip()
     except Exception as e:
-        print(f\"OpenAI summary error: {e}\")
-        return f\"(OpenAI 요약 오류: {e})\"
+        print(f"OpenAI summary error: {e}")
+        return f"(OpenAI 요약 오류: {e})"
 
-
-if __name__ == \"__main__\":
+if __name__ == "__main__":
     import uvicorn
-
-    port = int(os.environ.get(\"PORT\", 8000))
-    uvicorn.run(\"app:app\", host=\"0.0.0.0\", port=port)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
