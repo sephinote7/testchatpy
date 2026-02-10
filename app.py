@@ -62,7 +62,7 @@ async def summarize_audio(
     transcript = ""
     chat_messages: list = []
 
-    # 1. 채팅 로그 파싱
+    # 1. 채팅 로그 파싱 (기존과 동일)
     if msg_data:
         try:
             chat_messages = json.loads(msg_data)
@@ -73,25 +73,38 @@ async def summarize_audio(
     if audio and audio.filename:
         content = await audio.read()
         if content:
+            # 확장자에 상관없이 캔버스 합성 녹화본은 video/webm인 경우가 많습니다.
             suffix = "." + audio.filename.rsplit(".", 1)[-1].lower() if "." in audio.filename else ".webm"
-            mime_type = MIME_MAP.get(suffix, "video/webm")
+            # 녹화 로직에서 영상+음성을 합쳤으므로 video/webm으로 처리하는 것이 더 안전합니다.
+            mime_type = "video/webm" if suffix == ".webm" else MIME_MAP.get(suffix, "video/webm")
             
+            print(f"파일 수신 완료: {audio.filename}, 크기: {len(content)} bytes, MIME: {mime_type}")
+
             try:
                 audio_part = types.Part.from_bytes(data=content, mime_type=mime_type)
-                # Gemini 2.0 Flash 모델 사용
+                
+                # Gemini 2.0 Flash 모델에 더 구체적인 지시 추가
                 response = client.models.generate_content(
                     model="gemini-2.0-flash",
                     contents=[
-                        "영상/음성 대화 내용을 텍스트로 모두 추출해 주세요. 한국어로 작성해 주세요.",
+                        "너는 전문 속기사야. 첨부된 멀티미디어 파일에서 사람들이 나누는 대화 내용을 하나도 빠짐없이 한국어 텍스트로 받아쓰기 해줘. 대화가 없다면 '대화 없음'이라고 적어줘.",
                         audio_part,
                     ],
                 )
-                transcript = (response.text or "").strip()
+                
+                # 응답 추출 방식 보완
+                if response and response.text:
+                    transcript = response.text.strip()
+                print(f"STT 성공 결과 샘플: {transcript[:50]}...")
+                
             except Exception as e:
-                print(f"STT Error: {e}") # STT 실패 시 에러 로그만 남김
+                # 에러 발생 시 서버 터미널에 상세 로그 출력
+                print(f"!!! STT Error !!!: {str(e)}")
+                transcript = ""
 
-    # 3. 텍스트 통합 (STT 결과 + 채팅 로그)
-    combined_text = transcript
+    # 3. 텍스트 통합
+    combined_text = transcript if transcript and "대화 없음" not in transcript else ""
+    
     if chat_messages:
         chat_lines = [f"{m.get('from', '?')}: {m.get('text', '')}" for m in chat_messages if m.get('text')]
         chat_str = "\n".join(chat_lines)
@@ -103,7 +116,11 @@ async def summarize_audio(
         try:
             summary = _summarize_text(client, combined_text)
         except Exception as e:
+            print(f"Summary Error: {e}")
             summary = f"(요약 중 오류 발생: {str(e)})"
+    else:
+        # 여기에 들어왔다면 combined_text가 비어있다는 뜻
+        print("분석할 텍스트가 비어있어 요약을 진행하지 않습니다.")
 
     return SummarizeResponse(
         transcript=transcript or None,
