@@ -37,10 +37,15 @@ app.add_middleware(
 class SummarizeTextRequest(BaseModel):
     text: str
 
+class SttItem(BaseModel):
+    speaker: str  # "user" | "cnsler"
+    text: str
+
 class SummarizeResponse(BaseModel):
     transcript: str | None = None
     summary: str
     msg_data: list | None = None
+    stt: list[SttItem] | None = None
 
 @app.get("/")
 async def root():
@@ -53,11 +58,14 @@ async def root():
 @app.post("/api/summarize", response_model=SummarizeResponse)
 async def summarize_audio(
     audio: UploadFile = File(None),
+    audio_user: UploadFile = File(None),
+    audio_cnsler: UploadFile = File(None),
     msg_data: str | None = Form(None),
 ):
     client = get_openai_client()
     transcript = ""
     chat_messages: list = []
+    stt_items: list[SttItem] = []
 
     # 1. 채팅 로그 파싱
     if msg_data:
@@ -66,26 +74,49 @@ async def summarize_audio(
         except Exception:
             chat_messages = []
 
+    def _transcribe(upload: UploadFile | None) -> str:
+        if not upload or not upload.filename:
+            return ""
+        try:
+            # 메모리 내에서 파일 객체 생성
+            content = upload.file.read()
+            if not content:
+                return ""
+            bio = io.BytesIO(content)
+            bio.name = upload.filename or "audio.webm"
+            print(f"Whisper STT 요청: {bio.name}, 크기: {len(content)} bytes")
+            tr = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=bio,
+            )
+            text = (tr.text or "").strip()
+            print(f"Whisper STT 결과 샘플: {text[:50]}...")
+            return text
+        except Exception as e:
+            print(f"Whisper STT 오류: {e}")
+            return ""
+
     # 2. 오디오/영상 파일 처리 (Whisper STT)
-    if audio and audio.filename:
-        content = await audio.read()
-        if content:
-            try:
-                # 메모리 내에서 파일 객체 생성
-                bio = io.BytesIO(content)
-                bio.name = audio.filename or "audio.webm"
-                
-                print(f"Whisper STT 요청: {bio.name}, 크기: {len(content)} bytes")
-                
-                tr = client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=bio,
-                )
-                transcript = (tr.text or "").strip()
-                print(f"Whisper STT 결과 샘플: {transcript[:50]}...")
-            except Exception as e:
-                print(f"Whisper STT 오류: {e}")
-                transcript = ""
+    # 분리 업로드가 있으면 speaker별로 따로 STT
+    user_text = _transcribe(audio_user) if audio_user else ""
+    cnsler_text = _transcribe(audio_cnsler) if audio_cnsler else ""
+
+    if audio_user or audio_cnsler:
+        stt_items = [
+            SttItem(speaker="user", text=user_text or "(음성 인식 결과 없음)"),
+            SttItem(speaker="cnsler", text=cnsler_text or "(음성 인식 결과 없음)"),
+        ]
+        transcript = "\n".join(
+            [
+                f"user: {user_text}".strip(),
+                f"cnsler: {cnsler_text}".strip(),
+            ]
+        ).strip()
+    else:
+        # 기존 단일 업로드 호환
+        transcript = _transcribe(audio) if audio else ""
+        if audio:
+            stt_items = [SttItem(speaker="user", text=transcript or "(음성 인식 결과 없음)")]
 
     # 3. 텍스트 통합
     combined_text = transcript or ""
@@ -115,6 +146,7 @@ async def summarize_audio(
         transcript=transcript or None,
         summary=summary,
         msg_data=chat_messages if chat_messages else None,
+        stt=stt_items if stt_items else None,
     )
 
 @app.post("/api/summarize-text", response_model=SummarizeResponse)
