@@ -111,6 +111,9 @@ async def summarize_audio(
             print(f"Summary Error (OpenAI): {e}")
             summary = f"(요약 중 오류 발생: {str(e)})"
 
+    # 요구사항: summary 최대 200자 저장
+    summary = (summary or "")[:200]
+
     return SummarizeResponse(
         transcript=transcript or None,
         summary=summary,
@@ -120,6 +123,7 @@ async def summarize_audio(
 @app.post("/api/summarize-text", response_model=SummarizeResponse)
 async def summarize_text_only(body: SummarizeTextRequest):
     summary = _summarize_with_openai(body.text.strip())
+    summary = (summary or "")[:200]  # 요구사항: 최대 200자
     return SummarizeResponse(transcript=body.text, summary=summary)
 
 def _summarize_with_openai(text: str) -> str:
