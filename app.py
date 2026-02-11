@@ -106,13 +106,10 @@ async def summarize_audio(
     summary = "(분석할 내용이 없습니다.)"
     if combined_text.strip():
         try:
-            summary = _summarize_with_openai(combined_text)
+            summary = _summarize_with_openai_300(combined_text)
         except Exception as e:
             print(f"Summary Error (OpenAI): {e}")
             summary = f"(요약 중 오류 발생: {str(e)})"
-
-    # 요구사항: summary 최대 200자 저장
-    summary = (summary or "")[:200]
 
     return SummarizeResponse(
         transcript=transcript or None,
@@ -122,8 +119,7 @@ async def summarize_audio(
 
 @app.post("/api/summarize-text", response_model=SummarizeResponse)
 async def summarize_text_only(body: SummarizeTextRequest):
-    summary = _summarize_with_openai(body.text.strip())
-    summary = (summary or "")[:200]  # 요구사항: 최대 200자
+    summary = _summarize_with_openai_300(body.text.strip())
     return SummarizeResponse(transcript=body.text, summary=summary)
 
 def _summarize_with_openai(text: str) -> str:
@@ -147,6 +143,73 @@ def _summarize_with_openai(text: str) -> str:
     except Exception as e:
         print(f"OpenAI summary error: {e}")
         return f"(OpenAI 요약 오류: {e})"
+
+def _summarize_with_openai_300(text: str) -> str:
+    """
+    요구사항:
+    - 300자 이내
+    - 중간에 내용을 자르지 않기 (slice로 절단 금지)
+    전략:
+    - 1차: 모델에 300자 이내로 요약하도록 강하게 제약
+    - 2차(초과 시): 결과를 다시 '300자 이내로 자연스럽게' 재요약
+    """
+    base_prompt = (
+        "당신은 상담/대화 내용을 정리하는 한국어 요약가입니다.\n"
+        "- 결과는 반드시 300자 이내로 작성하세요.\n"
+        "- 문장이 중간에 끊기지 않도록 자연스럽게 마무리하세요.\n"
+        "- 핵심만 간결하게 3~5문장으로 요약하세요.\n\n"
+        f"원문:\n{text}"
+    )
+    summary = _summarize_with_openai(base_prompt)
+    if len(summary) <= 300:
+        return summary
+
+    retry_prompt = (
+        "아래 요약을 문장이 끊기지 않게 자연스럽게 다듬되, 반드시 300자 이내로 줄여주세요.\n\n"
+        f"요약:\n{summary}"
+    )
+    summary2 = _summarize_with_openai(retry_prompt)
+    # 그래도 초과하면 한 번 더 강하게
+    if len(summary2) <= 300:
+        return summary2
+
+    retry_prompt2 = (
+        "반드시 300자 이내로, 문장 마무리를 완결형으로 작성하세요. 불릿/번호 없이 문장으로만.\n\n"
+        f"요약:\n{summary2}"
+    )
+    summary3 = _summarize_with_openai(retry_prompt2).strip()
+
+    # 그래도 300자를 넘으면 "문장 경계"에서만 줄여서(중간 절단 방지) 300자 이내 보장
+    return _truncate_korean_sentence_boundary(summary3, 300)
+
+def _truncate_korean_sentence_boundary(text: str, limit: int) -> str:
+    """
+    '중간에 끊기지 않게' 요구사항을 지키기 위해,
+    limit 안쪽의 마지막 문장/구분자 경계에서만 잘라냅니다.
+    """
+    t = (text or "").strip()
+    if len(t) <= limit:
+        return t
+
+    head = t[:limit]
+    # 한국어 문장 종결/구분자 후보
+    seps = ["\n", ". ", "…", "!", "?", "。", "다.", "요.", "니다.", "."]
+    cut = -1
+    for sep in seps:
+        idx = head.rfind(sep)
+        if idx > cut:
+            cut = idx
+
+    if cut >= 0:
+        # sep 끝까지 포함하도록
+        trimmed = head[: cut + 1].strip()
+        return trimmed if trimmed else head.strip()
+
+    # 경계가 없으면 마지막 공백에서 자름(최후의 수단)
+    ws = head.rfind(" ")
+    if ws > 0:
+        return head[:ws].strip()
+    return head.strip()
 
 if __name__ == "__main__":
     import uvicorn
