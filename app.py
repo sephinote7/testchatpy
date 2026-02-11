@@ -81,8 +81,11 @@ async def summarize_audio(
         try:
             content = upload.file.read()
             if not content: return ""
+            
             bio = io.BytesIO(content)
-            bio.name = upload.filename or "audio.webm"
+            # [수정] 파일명을 반드시 지원 확장자로 명시해야 400 에러가 나지 않습니다.
+            bio.name = "audio.webm" 
+            
             tr = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=bio,
