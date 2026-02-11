@@ -74,79 +74,81 @@ async def summarize_audio(
         except Exception:
             chat_messages = []
 
+    # 내부 함수: Whisper STT 호출
     def _transcribe(upload: UploadFile | None) -> str:
         if not upload or not upload.filename:
             return ""
         try:
-            # 메모리 내에서 파일 객체 생성
             content = upload.file.read()
-            if not content:
-                return ""
+            if not content: return ""
             bio = io.BytesIO(content)
             bio.name = upload.filename or "audio.webm"
-            print(f"Whisper STT 요청: {bio.name}, 크기: {len(content)} bytes")
             tr = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=bio,
             )
-            text = (tr.text or "").strip()
-            print(f"Whisper STT 결과 샘플: {text[:50]}...")
-            return text
+            return (tr.text or "").strip()
         except Exception as e:
-            print(f"Whisper STT 오류: {e}")
+            print(f"STT 오류: {e}")
             return ""
 
-    # 2. 오디오/영상 파일 처리 (Whisper STT)
-    # 분리 업로드가 있으면 speaker별로 따로 STT
+    # 2. STT 처리 (각 화자별)
     user_text = _transcribe(audio_user) if audio_user else ""
     cnsler_text = _transcribe(audio_cnsler) if audio_cnsler else ""
 
-    if audio_user or audio_cnsler:
-        stt_items = [
-            SttItem(speaker="user", text=user_text or "(음성 인식 결과 없음)"),
-            SttItem(speaker="cnsler", text=cnsler_text or "(음성 인식 결과 없음)"),
-        ]
-        transcript = "\n".join(
-            [
-                f"user: {user_text}".strip(),
-                f"cnsler: {cnsler_text}".strip(),
-            ]
-        ).strip()
-    else:
-        # 기존 단일 업로드 호환
-        transcript = _transcribe(audio) if audio else ""
-        if audio:
-            stt_items = [SttItem(speaker="user", text=transcript or "(음성 인식 결과 없음)")]
+    # 텍스트 합치기 (GPT 참고용)
+    transcript = f"user: {user_text}\ncnsler: {cnsler_text}".strip()
+    stt_items = [
+        SttItem(speaker="user", text=user_text or "(음성 없음)"),
+        SttItem(speaker="cnsler", text=cnsler_text or "(음성 없음)")
+    ]
 
-    # 3. 텍스트 통합
-    combined_text = transcript or ""
-    if chat_messages:
-        chat_lines = [
-            f"{m.get('from', '?')}: {m.get('text', '')}"
-            for m in chat_messages
-            if m.get("text")
-        ]
-        chat_str = "\n".join(chat_lines)
-        combined_text = (
-            f"{combined_text}\n\n[채팅 로그]\n{chat_str}"
-            if combined_text
-            else chat_str
+    # 3. GPT-4o-mini를 이용한 대화 복원 및 요약 (핵심!)
+    reorder_and_sum_prompt = f"""
+    당신은 상담 데이터 정리 전문가입니다. [음성 인식 결과]와 [채팅 기록]을 분석하여 다음을 수행하세요.
+
+    1. 대화 복원: 채팅 시간과 음성 내용을 문맥적으로 파악하여, 상담사와 사용자의 대화를 시간순으로 재배열한 JSON 배열을 만드세요.
+    2. 내용 요약: 전체 대화의 핵심을 300자 이내로 요약하세요.
+
+    [음성 인식 결과]
+    {transcript}
+
+    [채팅 기록]
+    {msg_data}
+
+    반드시 다음 JSON 형식으로만 응답하세요:
+    {{
+      "reordered_msg": [
+        {{"type": "chat|stt", "speaker": "user|cnsler", "text": "...", "timestamp": "..."}}
+      ],
+      "summary": "요약 내용"
+    }}
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "너는 데이터를 정교하게 정렬하는 JSON API 서버야."},
+                {"role": "user", "content": reorder_and_sum_prompt},
+            ],
+            response_format={ "type": "json_object" }
         )
+        
+        result_json = json.loads(response.choices[0].message.content)
+        final_messages = result_json.get("reordered_msg", [])
+        final_summary = result_json.get("summary", "(요약 실패)")
+    except Exception as e:
+        print(f"GPT 처리 오류: {e}")
+        final_messages = chat_messages # 실패 시 원본 채팅이라도 유지
+        final_summary = "요약 중 오류가 발생했습니다."
 
-    # 4. 최종 요약 생성 (gpt-4o-mini)
-    summary = "(분석할 내용이 없습니다.)"
-    if combined_text.strip():
-        try:
-            summary = _summarize_with_openai_300(combined_text)
-        except Exception as e:
-            print(f"Summary Error (OpenAI): {e}")
-            summary = f"(요약 중 오류 발생: {str(e)})"
-
+    # 4. 최종 결과 반환 (하나의 return문으로 정리)
     return SummarizeResponse(
-        transcript=transcript or None,
-        summary=summary,
-        msg_data=chat_messages if chat_messages else None,
-        stt=stt_items if stt_items else None,
+        transcript=transcript,
+        summary=final_summary,
+        msg_data=final_messages,
+        stt=stt_items
     )
 
 @app.post("/api/summarize-text", response_model=SummarizeResponse)
@@ -177,42 +179,13 @@ def _summarize_with_openai(text: str) -> str:
         return f"(OpenAI 요약 오류: {e})"
 
 def _summarize_with_openai_300(text: str) -> str:
-    """
-    요구사항:
-    - 300자 이내
-    - 중간에 내용을 자르지 않기 (slice로 절단 금지)
-    전략:
-    - 1차: 모델에 300자 이내로 요약하도록 강하게 제약
-    - 2차(초과 시): 결과를 다시 '300자 이내로 자연스럽게' 재요약
-    """
-    base_prompt = (
-        "당신은 상담/대화 내용을 정리하는 한국어 요약가입니다.\n"
-        "- 결과는 반드시 300자 이내로 작성하세요.\n"
-        "- 문장이 중간에 끊기지 않도록 자연스럽게 마무리하세요.\n"
-        "- 핵심만 간결하게 3~5문장으로 요약하세요.\n\n"
+    # 여러 단계 거치지 말고 한 번에 명확하게 지시
+    prompt = (
+        "상담 내용을 300자 이내의 단락으로 요약하세요. "
+        "반드시 한국어 문장 완결형(.니다)으로 끝내야 합니다. "
         f"원문:\n{text}"
     )
-    summary = _summarize_with_openai(base_prompt)
-    if len(summary) <= 300:
-        return summary
-
-    retry_prompt = (
-        "아래 요약을 문장이 끊기지 않게 자연스럽게 다듬되, 반드시 300자 이내로 줄여주세요.\n\n"
-        f"요약:\n{summary}"
-    )
-    summary2 = _summarize_with_openai(retry_prompt)
-    # 그래도 초과하면 한 번 더 강하게
-    if len(summary2) <= 300:
-        return summary2
-
-    retry_prompt2 = (
-        "반드시 300자 이내로, 문장 마무리를 완결형으로 작성하세요. 불릿/번호 없이 문장으로만.\n\n"
-        f"요약:\n{summary2}"
-    )
-    summary3 = _summarize_with_openai(retry_prompt2).strip()
-
-    # 그래도 300자를 넘으면 "문장 경계"에서만 줄여서(중간 절단 방지) 300자 이내 보장
-    return _truncate_korean_sentence_boundary(summary3, 300)
+    return _summarize_with_openai(prompt) # 300자 넘으면 그때만 문장 단위 절삭
 
 def _truncate_korean_sentence_boundary(text: str, limit: int) -> str:
     """
