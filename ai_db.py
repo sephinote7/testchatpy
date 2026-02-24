@@ -1,6 +1,6 @@
 """
-bot_msg 테이블 접근.
-스키마: bot_msg_id(PK), cnsl_id, member_id, msg_data(jsonb), summary(text), created_at, updated_at
+ai_msg 테이블 접근.
+스키마: ai_id(PK), cnsl_id, member_id(varchar), msg_data(jsonb), summary(text), created_at, updated_at
 cnsl_id당 1행, msg_data = { "content": [ { "speaker": "user"|"ai", "text": "...", "type": "chat", "timestamp": 123 } ] }
 """
 import json
@@ -36,8 +36,8 @@ def get_bot_msg(cnsl_id: int, member_id: str) -> Optional[dict]:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                """SELECT bot_msg_id, cnsl_id, member_id, msg_data, summary, created_at, updated_at
-                   FROM bot_msg WHERE cnsl_id = %s AND member_id = %s LIMIT 1""",
+                """SELECT ai_id, cnsl_id, member_id, msg_data, summary, created_at, updated_at
+                   FROM ai_msg WHERE cnsl_id = %s AND member_id = %s LIMIT 1""",
                 (cnsl_id, member_id),
             )
             row = cur.fetchone()
@@ -53,12 +53,12 @@ def upsert_bot_msg(cnsl_id: int, member_id: str, msg_data: dict, summary: Option
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                """INSERT INTO bot_msg (cnsl_id, member_id, msg_data, summary, created_at, updated_at)
+                """INSERT INTO ai_msg (cnsl_id, member_id, msg_data, summary, created_at, updated_at)
                    VALUES (%s, %s, %s::jsonb, %s, %s::timestamp, %s::timestamp)
                    ON CONFLICT (cnsl_id, member_id)
                    DO UPDATE SET msg_data = EXCLUDED.msg_data,
-                       summary = COALESCE(EXCLUDED.summary, bot_msg.summary), updated_at = EXCLUDED.updated_at
-                   RETURNING bot_msg_id, cnsl_id, member_id, msg_data, summary, created_at, updated_at""",
+                       summary = COALESCE(EXCLUDED.summary, ai_msg.summary), updated_at = EXCLUDED.updated_at
+                   RETURNING ai_id, cnsl_id, member_id, msg_data, summary, created_at, updated_at""",
                 (cnsl_id, member_id, msg_data_json, summary or None, now, now),
             )
             row = cur.fetchone()

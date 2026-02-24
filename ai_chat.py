@@ -1,6 +1,6 @@
 """
 AI 상담 API (회원 전용). VisualChat 형식 반환.
-- GET  /api/ai/chat/{cnsl_id}  : bot_msg 조회
+- GET  /api/ai/chat/{cnsl_id}  : ai_msg 조회
 - POST /api/ai/chat/{cnsl_id}  : 사용자 메시지 전송 → OpenAI 응답 저장 후 반환
 - POST /api/ai/chat/{cnsl_id}/summary : 요약 생성 후 summary 저장
 """
@@ -25,7 +25,7 @@ def get_member_email(x_user_email: str | None = Header(None, alias="X-User-Email
 
 
 def _row_to_visual_format(row: dict | None) -> dict | None:
-    """bot_msg 행을 VisualChat 응답 형식으로 변환."""
+    """ai_msg 행을 VisualChat 응답 형식으로 변환."""
     if not row:
         return None
     msg_data = row.get("msg_data") or {"content": []}
@@ -33,7 +33,7 @@ def _row_to_visual_format(row: dict | None) -> dict | None:
     if hasattr(created, "isoformat"):
         created = created.isoformat()
     return {
-        "chatId": row.get("bot_msg_id"),
+        "chatId": row.get("ai_id"),
         "cnslId": row.get("cnsl_id"),
         "cnslerId": "",
         "memberId": row.get("member_id"),
@@ -46,7 +46,7 @@ def _row_to_visual_format(row: dict | None) -> dict | None:
 
 @router.get("/chat/{cnsl_id}")
 async def get_chat(cnsl_id: int, member_id: str = Depends(get_member_email)):
-    """bot_msg 조회. VisualChat 형식으로 목록 1건 반환."""
+    """ai_msg 조회. VisualChat 형식으로 목록 1건 반환."""
     row = get_bot_msg(cnsl_id, member_id)
     out = [_row_to_visual_format(row)] if row else []
     return out
