@@ -94,16 +94,17 @@ async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email))
             messages=[
                 {
                     "role": "system",
-                    "content": "다음 상담 대화를 한국어로 3~5문장, 300자 이내로 요약해 주세요. "
-                    "핵심 고민 주제와 감정, 주요 논의 포인트만 정리하고, 새로운 조언은 추가하지 마세요.",
+                    "content": (
+                        "다음 상담 대화를 한국어로 3~5문장, 300자 이내로 요약해 주세요. "
+                        "반드시 300자를 넘기지 마세요. "
+                        "핵심 고민 주제와 감정, 주요 논의 포인트만 정리하고, 새로운 조언은 추가하지 마세요."
+                    ),
                 },
                 {"role": "user", "content": full_text},
             ],
             max_tokens=300,
         )
         summary = (r.choices[0].message.content or "").strip()
-        if len(summary) > 300:
-            summary = summary[:300]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SUMMARY_FAILED: {e}")
     row = update_summary(cnsl_id, member_id, summary)
