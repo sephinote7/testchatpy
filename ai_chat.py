@@ -76,7 +76,7 @@ async def post_chat(cnsl_id: int, body: PostChatBody, member_id: str = Depends(g
 
 @router.post("/chat/{cnsl_id}/summary")
 async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email)):
-    """대화 기준 요약 생성 후 summary 저장."""
+    """대화 기준 요약 생성 후 summary 저장 (300자 이내)."""
     row = get_bot_msg(cnsl_id, member_id)
     if not row:
         raise HTTPException(status_code=404, detail="해당 상담 기록이 없습니다.")
@@ -92,12 +92,18 @@ async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email))
         r = client.chat.completions.create(
             model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
             messages=[
-                {"role": "system", "content": "다음 상담 대화를 3~5문장으로 요약해 주세요."},
+                {
+                    "role": "system",
+                    "content": "다음 상담 대화를 한국어로 3~5문장, 300자 이내로 요약해 주세요. "
+                    "핵심 고민 주제와 감정, 주요 논의 포인트만 정리하고, 새로운 조언은 추가하지 마세요.",
+                },
                 {"role": "user", "content": full_text},
             ],
             max_tokens=300,
         )
         summary = (r.choices[0].message.content or "").strip()
+        if len(summary) > 300:
+            summary = summary[:300]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SUMMARY_FAILED: {e}")
     row = update_summary(cnsl_id, member_id, summary)
