@@ -34,6 +34,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from ai_chat import router as ai_chat_router
+app.include_router(ai_chat_router)
+
 class SummarizeResponse(BaseModel):
     transcript: str | None = None
     summary: str
