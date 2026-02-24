@@ -69,10 +69,25 @@ def upsert_bot_msg(cnsl_id: int, member_id: str, msg_data: dict, summary: Option
 
 def append_message(cnsl_id: int, member_id: str, speaker: str, text: str) -> dict:
     existing = get_bot_msg(cnsl_id, member_id)
-    content = list((existing or {}).get("msg_data") or {}).get("content") or []
-    if isinstance(content, str):
+    msg_data = (existing or {}).get("msg_data") if existing else None
+
+    if isinstance(msg_data, dict):
+        content = msg_data.get("content") or []
+    else:
         content = []
-    content.append({"speaker": speaker, "text": text, "type": "chat", "timestamp": int(time.time() * 1000)})
+
+    # content가 문자열이거나 리스트가 아니면 초기화
+    if isinstance(content, str) or not isinstance(content, list):
+        content = []
+
+    content.append(
+        {
+            "speaker": speaker,
+            "text": text,
+            "type": "chat",
+            "timestamp": int(time.time() * 1000),
+        }
+    )
     return upsert_bot_msg(cnsl_id, member_id, {"content": content})
 
 
