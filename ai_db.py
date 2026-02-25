@@ -30,6 +30,19 @@ def get_conn():
         conn.close()
 
 
+def member_exists_by_email(email: str) -> bool:
+    """member 테이블에 해당 email 존재 여부. cnsl_reg.member_id는 member.email 참조."""
+    if not DATABASE_URL or not (email or "").strip():
+        return False
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM member WHERE email = %s LIMIT 1",
+                (email.strip(),),
+            )
+            return cur.fetchone() is not None
+
+
 def get_bot_msg(cnsl_id: int, member_id: str) -> Optional[dict]:
     if not DATABASE_URL:
         return None

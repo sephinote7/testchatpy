@@ -19,6 +19,7 @@ from ai_db import (
     get_ai_consult_cnsl,
     get_ai_consult_history,
     get_bot_msg,
+    member_exists_by_email,
     update_summary,
 )
 from ai_openai import get_ai_reply
@@ -30,9 +31,11 @@ history_router = APIRouter(prefix="/api/ai", tags=["ai-chat"])
 
 
 def get_member_email(x_user_email: str | None = Header(None, alias="X-User-Email")) -> str:
-    """회원 전용: X-User-Email 필수."""
+    """회원 전용: X-User-Email 필수. member 테이블에 존재하는 email만 허용."""
     email = (x_user_email or "").strip()
     if not email:
+        raise HTTPException(status_code=401, detail="존재하지 않는 User")
+    if not member_exists_by_email(email):
         raise HTTPException(status_code=401, detail="존재하지 않는 User")
     return email
 
@@ -180,6 +183,7 @@ async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email))
     out = _row_to_visual_format(row)
     if out:
         out["cnsl_content"] = cnsl_content or summary
+        out.pop("msg_data", None)  # summary API 반환값에서 msg_data 제외
     return out
 
 
