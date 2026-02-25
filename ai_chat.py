@@ -110,19 +110,29 @@ async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email))
             max_tokens=400,
         )
         raw = (r.choices[0].message.content or "").strip()
+        # 마크다운 코드블록 제거 (```json\n{...}``` 등)
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:] if len(lines) > 1 else [raw[3:]])
+        if raw.rstrip().endswith("```"):
+            raw = raw.rstrip()[:-3].rstrip()
+        json_str = raw.strip()
+
         summary = ""
         cnsl_content = ""
         try:
-            parsed = json.loads(raw)
-            summary = (parsed.get("summary") or "").strip()
-            cnsl_content = (parsed.get("cnsl_content") or "").strip()
+            parsed = json.loads(json_str)
+            s = parsed.get("summary")
+            c = parsed.get("cnsl_content")
+            summary = str(s).strip() if s is not None else ""
+            cnsl_content = str(c).strip() if c is not None else ""
         except Exception:
-            summary = raw[:300]
-            cnsl_content = raw[:80].rstrip()
+            summary = json_str[:300]
+            cnsl_content = json_str[:80].rstrip()
             if not cnsl_content.endswith("상담을 진행했습니다."):
                 cnsl_content = (cnsl_content.rstrip(".").rstrip() + "에 대한 상담을 진행했습니다.")[:80]
         if not summary:
-            summary = raw[:300]
+            summary = json_str[:300]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SUMMARY_FAILED: {e}")
     row = update_summary(cnsl_id, member_id, summary)
