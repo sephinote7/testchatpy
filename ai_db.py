@@ -91,6 +91,39 @@ def append_message(cnsl_id: int, member_id: str, speaker: str, text: str) -> dic
     return upsert_bot_msg(cnsl_id, member_id, {"content": content})
 
 
+def get_ai_consult_history(member_id: str) -> list:
+    """cnsl_reg에서 cnsl_tp='3'(AI상담) 목록 조회. del_yn='N' 또는 null만."""
+    if not DATABASE_URL:
+        return []
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """SELECT cnsl_id, cnsl_stat, cnsl_dt, cnsl_start_time, cnsl_end_time, cnsl_title, cnsl_content
+                   FROM cnsl_reg
+                   WHERE member_id = %s AND cnsl_tp = '3' AND (del_yn IS NULL OR del_yn = 'N')
+                   ORDER BY cnsl_id DESC""",
+                (member_id,),
+            )
+            rows = cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_ai_consult(cnsl_id: int, member_id: str) -> bool:
+    """AI 상담 삭제 처리(소프트 삭제). cnsl_reg.del_yn='Y'"""
+    if not DATABASE_URL:
+        return False
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """UPDATE cnsl_reg SET del_yn = 'Y', updated_at = CURRENT_TIMESTAMP
+                   WHERE cnsl_id = %s AND member_id = %s AND cnsl_tp = '3'
+                   RETURNING cnsl_id""",
+                (cnsl_id, member_id),
+            )
+            row = cur.fetchone()
+    return row is not None
+
+
 def update_summary(cnsl_id: int, member_id: str, summary: str) -> Optional[dict]:
     """ai_msg.summary 컬럼만 업데이트. msg_data는 건드리지 않음."""
     if not DATABASE_URL:

@@ -1,8 +1,10 @@
 """
-AI 상담 API (회원 전용). VisualChat 형식 반환.
-- GET  /api/ai/chat/{cnsl_id}  : ai_msg 조회
-- POST /api/ai/chat/{cnsl_id}  : 사용자 메시지 전송 → OpenAI 응답 저장 후 반환
-- POST /api/ai/chat/{cnsl_id}/summary : 요약 생성 후 summary 저장
+AI 상담 API (회원 전용). cnsl_tp=3(AI상담) 전용.
+- GET    /api/ai/chat/history       : AI 상담 목록 조회 (cnsl_reg, cnsl_tp=3)
+- GET    /api/ai/chat/{cnsl_id}     : ai_msg 조회 (상세)
+- POST   /api/ai/chat/{cnsl_id}     : 메시지 전송 → OpenAI 응답 저장 후 반환
+- POST   /api/ai/chat/{cnsl_id}/summary : 요약 생성 후 ai_msg.summary, cnsl_reg.cnsl_content 저장
+- DELETE /api/ai/chat/{cnsl_id}     : AI 상담 삭제 처리(소프트 삭제)
 """
 import json
 import os
@@ -10,11 +12,13 @@ import os
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
-from ai_db import append_message, get_bot_msg, update_summary
+from ai_db import append_message, delete_ai_consult, get_ai_consult_history, get_bot_msg, update_summary
 from ai_openai import get_ai_reply
 from openai import OpenAI
 
 router = APIRouter(prefix="/api/ai", tags=["ai-chat"])
+# history는 {cnsl_id}보다 먼저 매칭되어야 함 → 별도 라우터로 먼저 include
+history_router = APIRouter(prefix="/api/ai", tags=["ai-chat"])
 
 
 def get_member_email(x_user_email: str | None = Header(None, alias="X-User-Email")) -> str:
@@ -43,6 +47,19 @@ def _row_to_visual_format(row: dict | None) -> dict | None:
         "summary": row.get("summary"),
         "msg_data": msg_data,
     }
+
+
+@history_router.get("/chat/history")
+async def get_chat_history(member_id: str = Depends(get_member_email)):
+    """AI 상담(cnsl_tp=3) 목록 조회. cnsl_stat, cnsl_dt, cnsl_start_time, cnsl_end_time, cnsl_title, cnsl_content 반환."""
+    rows = get_ai_consult_history(member_id)
+    out = []
+    for r in rows:
+        row = dict(r)
+        if hasattr(row.get("cnsl_dt"), "isoformat"):
+            row["cnsl_dt"] = row["cnsl_dt"].isoformat()
+        out.append(row)
+    return out
 
 
 @router.get("/chat/{cnsl_id}")
@@ -142,3 +159,12 @@ async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email))
     if out:
         out["cnsl_content"] = cnsl_content or summary
     return out
+
+
+@router.delete("/chat/{cnsl_id}")
+async def delete_chat(cnsl_id: int, member_id: str = Depends(get_member_email)):
+    """AI 상담 기록 삭제 처리(소프트 삭제: cnsl_reg.del_yn='Y')."""
+    ok = delete_ai_consult(cnsl_id, member_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="해당 상담 기록을 찾을 수 없거나 삭제할 수 없습니다.")
+    return {"success": True}
