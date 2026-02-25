@@ -4,6 +4,7 @@ AI 상담 API (회원 전용). VisualChat 형식 반환.
 - POST /api/ai/chat/{cnsl_id}  : 사용자 메시지 전송 → OpenAI 응답 저장 후 반환
 - POST /api/ai/chat/{cnsl_id}/summary : 요약 생성 후 summary 저장
 """
+import json
 import os
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -95,19 +96,36 @@ async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email))
                 {
                     "role": "system",
                     "content": (
-                        "다음 상담 대화를 한국어로 3~5문장, 300자 이내로 요약해 주세요. "
-                        "반드시 300자를 넘기지 마세요. "
-                        "핵심 고민 주제와 감정, 주요 논의 포인트만 정리하고, 새로운 조언은 추가하지 마세요."
+                        "다음 상담 대화를 분석하여 JSON으로 답변하세요. 반드시 아래 형식만 사용하세요.\n\n"
+                        '{"summary": "3~5문장 요약, 300자 이내. 핵심 고민·감정·논의 포인트만, 새 조언 X", '
+                        '"cnsl_content": "한 줄, 80자 이내. ~하는 상담을 진행했습니다. 형식으로 어떤 상담인지 핵심만 표현"}\n\n'
+                        "예시 cnsl_content: 소중한 캐릭터를 잃은 슬픔을 표현하고, 추억을 간직하며 상실감을 치유하는 상담을 진행했습니다."
                     ),
                 },
                 {"role": "user", "content": full_text},
             ],
-            max_tokens=300,
+            max_tokens=400,
         )
-        summary = (r.choices[0].message.content or "").strip()
+        raw = (r.choices[0].message.content or "").strip()
+        summary = ""
+        cnsl_content = ""
+        try:
+            parsed = json.loads(raw)
+            summary = (parsed.get("summary") or "").strip()
+            cnsl_content = (parsed.get("cnsl_content") or "").strip()
+        except Exception:
+            summary = raw[:300]
+            cnsl_content = raw[:80].rstrip()
+            if not cnsl_content.endswith("했습니다."):
+                cnsl_content = (cnsl_content + " 상담을 진행했습니다.")[:80]
+        if not summary:
+            summary = raw[:300]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SUMMARY_FAILED: {e}")
     row = update_summary(cnsl_id, member_id, summary)
     if not row:
         raise HTTPException(status_code=500, detail="summary 저장 실패")
-    return _row_to_visual_format(row)
+    out = _row_to_visual_format(row)
+    if out:
+        out["cnsl_content"] = cnsl_content or summary
+    return out
