@@ -33,7 +33,7 @@ def get_member_email(x_user_email: str | None = Header(None, alias="X-User-Email
     """회원 전용: X-User-Email 필수."""
     email = (x_user_email or "").strip()
     if not email:
-        raise HTTPException(status_code=401, detail="회원만 이용 가능합니다.")
+        raise HTTPException(status_code=401, detail="존재하지 않는 User")
     return email
 
 
@@ -43,7 +43,7 @@ def _validate_cnsl_access(cnsl_id: int, member_id: str) -> None:
     if not cnsl:
         raise HTTPException(status_code=404, detail="해당 상담 기록을 찾을 수 없습니다.")
     if cnsl.get("member_id") != member_id:
-        raise HTTPException(status_code=403, detail="해당 상담에 접근할 수 없습니다.")
+        raise HTTPException(status_code=403, detail="해당 상담에 접근 불가")
 
 
 def _row_to_visual_format(row: dict | None) -> dict | None:
