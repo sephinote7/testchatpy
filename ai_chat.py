@@ -108,4 +108,6 @@ async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SUMMARY_FAILED: {e}")
     row = update_summary(cnsl_id, member_id, summary)
+    if not row:
+        raise HTTPException(status_code=500, detail="summary 저장 실패")
     return _row_to_visual_format(row)

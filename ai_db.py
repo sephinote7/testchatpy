@@ -91,8 +91,17 @@ def append_message(cnsl_id: int, member_id: str, speaker: str, text: str) -> dic
     return upsert_bot_msg(cnsl_id, member_id, {"content": content})
 
 
-def update_summary(cnsl_id: int, member_id: str, summary: str) -> dict:
-    existing = get_bot_msg(cnsl_id, member_id)
-    if not existing:
-        return upsert_bot_msg(cnsl_id, member_id, {"content": []}, summary=summary)
-    return upsert_bot_msg(cnsl_id, member_id, existing.get("msg_data") or {"content": []}, summary=summary)
+def update_summary(cnsl_id: int, member_id: str, summary: str) -> Optional[dict]:
+    """ai_msg.summary 컬럼만 업데이트. msg_data는 건드리지 않음."""
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL not set")
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """UPDATE ai_msg SET summary = %s, updated_at = CURRENT_TIMESTAMP
+                   WHERE cnsl_id = %s AND member_id = %s
+                   RETURNING ai_id, cnsl_id, member_id, msg_data, summary, created_at, updated_at""",
+                (summary, cnsl_id, member_id),
+            )
+            row = cur.fetchone()
+    return dict(row) if row else None
