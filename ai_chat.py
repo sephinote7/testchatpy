@@ -97,9 +97,12 @@ async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email))
                     "role": "system",
                     "content": (
                         "다음 상담 대화를 분석하여 JSON으로 답변하세요. 반드시 아래 형식만 사용하세요.\n\n"
-                        '{"summary": "3~5문장 요약, 300자 이내. 핵심 고민·감정·논의 포인트만, 새 조언 X", '
-                        '"cnsl_content": "한 줄, 80자 이내. ~하는 상담을 진행했습니다. 형식으로 어떤 상담인지 핵심만 표현"}\n\n'
-                        "예시 cnsl_content: 소중한 캐릭터를 잃은 슬픔을 표현하고, 추억을 간직하며 상실감을 치유하는 상담을 진행했습니다."
+                        '[summary] 3~5문장, 300자 이내. 상담자(내담자)와 상담사의 대화 내용을 객관적으로 요약. '
+                        '예: "웹 개발을 공부하며 취업에 대한 불안감을 느끼고 있는 상담자가 자신의 프로젝트 경험을 공유했습니다. '
+                        '이에 상담자는 웹 개발 분야의 성장 가능성을 언급하며..."\n\n'
+                        '[cnsl_content] 한 줄, 80자 이내. 반드시 "~에 대한 상담을 진행했습니다." 로 끝나야 함. '
+                        '예: "업무 중 손목 부상으로 어려움을 겪는 상황에 대한 상담을 진행했습니다."\n\n'
+                        '출력 형식: {"summary": "...", "cnsl_content": "..."}'
                     ),
                 },
                 {"role": "user", "content": full_text},
@@ -116,8 +119,8 @@ async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email))
         except Exception:
             summary = raw[:300]
             cnsl_content = raw[:80].rstrip()
-            if not cnsl_content.endswith("했습니다."):
-                cnsl_content = (cnsl_content + " 상담을 진행했습니다.")[:80]
+            if not cnsl_content.endswith("상담을 진행했습니다."):
+                cnsl_content = (cnsl_content.rstrip(".").rstrip() + "에 대한 상담을 진행했습니다.")[:80]
         if not summary:
             summary = raw[:300]
     except Exception as e:
