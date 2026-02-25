@@ -91,6 +91,22 @@ def append_message(cnsl_id: int, member_id: str, speaker: str, text: str) -> dic
     return upsert_bot_msg(cnsl_id, member_id, {"content": content})
 
 
+def get_ai_consult_cnsl(cnsl_id: int) -> Optional[dict]:
+    """cnsl_reg에서 cnsl_id 조회. cnsl_tp='3', del_yn in (N,NULL). 없으면 None."""
+    if not DATABASE_URL:
+        return None
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """SELECT cnsl_id, member_id FROM cnsl_reg
+                   WHERE cnsl_id = %s AND cnsl_tp = '3' AND (del_yn IS NULL OR del_yn = 'N')
+                   LIMIT 1""",
+                (cnsl_id,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
 def get_ai_consult_history(member_id: str) -> list:
     """cnsl_reg에서 cnsl_tp='3'(AI상담) 목록 조회. del_yn='N' 또는 null만."""
     if not DATABASE_URL:

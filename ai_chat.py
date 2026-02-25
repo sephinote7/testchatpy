@@ -12,7 +12,15 @@ import os
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
-from ai_db import append_message, delete_ai_consult, get_ai_consult_history, get_bot_msg, update_summary
+from ai_db import (
+    DATABASE_URL,
+    append_message,
+    delete_ai_consult,
+    get_ai_consult_cnsl,
+    get_ai_consult_history,
+    get_bot_msg,
+    update_summary,
+)
 from ai_openai import get_ai_reply
 from openai import OpenAI
 
@@ -27,6 +35,15 @@ def get_member_email(x_user_email: str | None = Header(None, alias="X-User-Email
     if not email:
         raise HTTPException(status_code=401, detail="회원만 이용 가능합니다.")
     return email
+
+
+def _validate_cnsl_access(cnsl_id: int, member_id: str) -> None:
+    """cnsl_id 존재 및 본인 소유 검증. 404(없음) 또는 403(타인 소유) raise."""
+    cnsl = get_ai_consult_cnsl(cnsl_id)
+    if not cnsl:
+        raise HTTPException(status_code=404, detail="해당 상담 기록을 찾을 수 없습니다.")
+    if cnsl.get("member_id") != member_id:
+        raise HTTPException(status_code=403, detail="해당 상담에 접근할 수 없습니다.")
 
 
 def _row_to_visual_format(row: dict | None) -> dict | None:
@@ -52,6 +69,8 @@ def _row_to_visual_format(row: dict | None) -> dict | None:
 @history_router.get("/chat/history")
 async def get_chat_history(member_id: str = Depends(get_member_email)):
     """AI 상담(cnsl_tp=3) 목록 조회. cnsl_stat, cnsl_dt, cnsl_start_time, cnsl_end_time, cnsl_title, cnsl_content 반환."""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="서비스를 일시적으로 사용할 수 없습니다.")
     rows = get_ai_consult_history(member_id)
     out = []
     for r in rows:
@@ -65,6 +84,7 @@ async def get_chat_history(member_id: str = Depends(get_member_email)):
 @router.get("/chat/{cnsl_id}")
 async def get_chat(cnsl_id: int, member_id: str = Depends(get_member_email)):
     """ai_msg 조회. VisualChat 형식으로 목록 1건 반환."""
+    _validate_cnsl_access(cnsl_id, member_id)
     row = get_bot_msg(cnsl_id, member_id)
     out = [_row_to_visual_format(row)] if row else []
     return out
@@ -78,6 +98,7 @@ class PostChatBody(BaseModel):
 @router.post("/chat/{cnsl_id}")
 async def post_chat(cnsl_id: int, body: PostChatBody, member_id: str = Depends(get_member_email)):
     """사용자 메시지 저장 → OpenAI 응답 생성·저장 → VisualChat 형식 1건 반환."""
+    _validate_cnsl_access(cnsl_id, member_id)
     content = (body.content or body.text or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="content 필수")
@@ -95,6 +116,7 @@ async def post_chat(cnsl_id: int, body: PostChatBody, member_id: str = Depends(g
 @router.post("/chat/{cnsl_id}/summary")
 async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email)):
     """대화 기준 요약 생성 후 summary 저장 (300자 이내)."""
+    _validate_cnsl_access(cnsl_id, member_id)
     row = get_bot_msg(cnsl_id, member_id)
     if not row:
         raise HTTPException(status_code=404, detail="해당 상담 기록이 없습니다.")
@@ -164,6 +186,7 @@ async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email))
 @router.delete("/chat/{cnsl_id}")
 async def delete_chat(cnsl_id: int, member_id: str = Depends(get_member_email)):
     """AI 상담 기록 삭제 처리(소프트 삭제: cnsl_reg.del_yn='Y')."""
+    _validate_cnsl_access(cnsl_id, member_id)
     ok = delete_ai_consult(cnsl_id, member_id)
     if not ok:
         raise HTTPException(status_code=404, detail="해당 상담 기록을 찾을 수 없거나 삭제할 수 없습니다.")
