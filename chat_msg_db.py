@@ -152,6 +152,56 @@ def append_chat_content(
         return dict(row)
 
 
+def update_cnsl_stat(cnsl_id: int, cnsl_stat: str) -> bool:
+    """cnsl_reg.cnsl_stat 업데이트. C(진행중), D(완료) 등."""
+    if not DATABASE_URL or cnsl_id <= 0 or not (cnsl_stat or "").strip():
+        return False
+    stat = cnsl_stat.strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE cnsl_reg SET cnsl_stat = %s WHERE cnsl_id = %s RETURNING cnsl_id",
+                (stat, cnsl_id),
+            )
+            return cur.fetchone() is not None
+
+
+def upsert_chat_msg_summary(
+    cnsl_id: int,
+    member_email: str,
+    cnsler_email: str,
+    summary: str,
+    msg_data_content: list,
+) -> Optional[dict]:
+    """
+    chat_msg에 summary + msg_data.content 전체 업데이트(추가 아님).
+    STT+chat 통합 데이터 저장용.
+    """
+    if not DATABASE_URL or cnsl_id <= 0:
+        return None
+    msg_data = {"content": msg_data_content if isinstance(msg_data_content, list) else []}
+    msg_data_json = json.dumps(msg_data, ensure_ascii=False)
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """UPDATE chat_msg SET msg_data = %s::jsonb, summary = %s
+                   WHERE cnsl_id = %s
+                   RETURNING chat_id, cnsl_id, member_id, cnsler_id, role, msg_data, summary, created_at""",
+                (msg_data_json, summary or "", cnsl_id),
+            )
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+            cur.execute(
+                """INSERT INTO chat_msg (cnsl_id, member_id, cnsler_id, role, msg_data, summary)
+                   VALUES (%s, %s, %s, 'user', %s::jsonb, %s)
+                   RETURNING chat_id, cnsl_id, member_id, cnsler_id, role, msg_data, summary, created_at""",
+                (cnsl_id, member_email, cnsler_email, msg_data_json, summary or ""),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
 def member_exists_by_email(email: str) -> bool:
     """member 테이블에 email 존재 여부."""
     if not DATABASE_URL or not (email or "").strip():

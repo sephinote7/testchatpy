@@ -13,6 +13,8 @@ from chat_msg_db import (
     get_chat_msg_by_cnsl,
     get_cnsl_reg,
     member_exists_by_email,
+    update_cnsl_stat,
+    upsert_chat_msg_summary,
 )
 
 router = APIRouter(prefix="/api/cnsl", tags=["cnsl-chat"])
@@ -144,4 +146,64 @@ async def post_chat_message(
         "createdAt": created,
         "created_at": created,
         "msg_data": row.get("msg_data"),
+    }
+
+
+class PatchStatBody(BaseModel):
+    cnslStat: str
+
+
+@router.patch("/{cnsl_id}/stat")
+async def patch_cnsl_stat(
+    cnsl_id: int,
+    body: PatchStatBody,
+    member_id: str = Depends(get_member_email),
+):
+    """cnsl_reg.cnsl_stat 업데이트. C=진행중, D=완료."""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="서비스를 일시적으로 사용할 수 없습니다.")
+    _validate_cnsl_access(cnsl_id, member_id)
+    stat = (body.cnslStat or "").strip()
+    if not stat:
+        raise HTTPException(status_code=400, detail="cnslStat 필수")
+    ok = update_cnsl_stat(cnsl_id, stat)
+    if not ok:
+        raise HTTPException(status_code=500, detail="상태 업데이트 실패")
+    return {"cnslId": cnsl_id, "cnslStat": stat.upper()}
+
+
+class PostSummaryFullBody(BaseModel):
+    summary: str
+    msg_data: list
+
+
+@router.post("/{cnsl_id}/chat/summary-full")
+async def post_summary_full(
+    cnsl_id: int,
+    body: PostSummaryFullBody,
+    member_id: str = Depends(get_member_email),
+):
+    """STT+chat 통합 msg_data + summary 저장. 기존 content 덮어쓰기."""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="서비스를 일시적으로 사용할 수 없습니다.")
+    _validate_cnsl_access(cnsl_id, member_id)
+    reg = get_cnsl_reg(cnsl_id)
+    member_email = reg.get("member_id") or ""
+    cnsler_email = reg.get("cnsler_id") or ""
+    row = upsert_chat_msg_summary(
+        cnsl_id=cnsl_id,
+        member_email=member_email,
+        cnsler_email=cnsler_email,
+        summary=body.summary or "",
+        msg_data_content=body.msg_data or [],
+    )
+    if not row:
+        raise HTTPException(status_code=500, detail="저장 실패")
+    created = row.get("created_at")
+    if hasattr(created, "isoformat"):
+        created = created.isoformat()
+    return {
+        "chatId": row.get("chat_id"),
+        "cnslId": cnsl_id,
+        "createdAt": created,
     }
