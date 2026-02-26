@@ -46,9 +46,12 @@ app.add_middleware(
 )
 
 from ai_chat import history_router, router as ai_chat_router
+from cnsl_chat import router as cnsl_chat_router
+
 # history 라우트를 {cnsl_id}보다 먼저 매칭되도록 먼저 include
 app.include_router(history_router)
 app.include_router(ai_chat_router)
+app.include_router(cnsl_chat_router)
 
 class SummarizeResponse(BaseModel):
     transcript: str | None = None
