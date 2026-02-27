@@ -50,6 +50,7 @@ def _flatten_to_frontend_format(row: dict, member_id: str, cnsler_id: str) -> li
     """
     chat_msg 1행(msg_data.content 배열)을 프론트엔드용 flat 리스트로 변환.
     Spring GET은 row 단위 반환이나, 프론트는 message 단위를 기대.
+    content 내 비정상 항목(문자열, "화상 상담 세션" 등)은 건너뜀.
     """
     if not row:
         return []
@@ -60,11 +61,14 @@ def _flatten_to_frontend_format(row: dict, member_id: str, cnsler_id: str) -> li
     chat_id = row.get("chat_id")
     out = []
     for idx, item in enumerate(content):
+        if not isinstance(item, dict):
+            continue
         speaker = (item.get("speaker") or "user").lower()
         text = item.get("text") or ""
+        if not isinstance(text, str):
+            text = str(text) if text is not None else ""
         ts = item.get("timestamp")
         role = "counselor" if speaker in ("cnsler", "counselor") else "user"
-        sender_email = cnsler_id if role == "counselor" else member_id
         out.append({
             "chatId": f"{chat_id}-{idx}" if chat_id else f"msg-{ts or idx}",
             "role": role,
@@ -92,10 +96,20 @@ async def get_chat_messages(cnsl_id: int, member_id: str = Depends(get_member_em
     reg = get_cnsl_reg(cnsl_id)
     member_email = reg.get("member_id") or ""
     cnsler_email = reg.get("cnsler_id") or ""
-    row = get_chat_msg_by_cnsl(cnsl_id)
+    try:
+        row = get_chat_msg_by_cnsl(cnsl_id)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"DB 조회 실패: {str(e)}")
     if not row:
         return []
-    flat = _flatten_to_frontend_format(row, member_email, cnsler_email)
+    try:
+        flat = _flatten_to_frontend_format(row, member_email, cnsler_email)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"msg_data 변환 실패: {str(e)}")
     return flat
 
 
