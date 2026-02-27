@@ -121,6 +121,13 @@ def append_chat_content(
                 row = cur.fetchone()
             else:
                 content = [entry]
+            # 마지막 채팅이 상담자(member)면 cnsl_todo_yn = N
+            if speaker == "user":
+                cur.execute(
+                    "UPDATE cnsl_reg SET cnsl_todo_yn = 'N' WHERE cnsl_id = %s",
+                    (cnsl_id,),
+                )
+            if not existing:
                 msg_data = {"content": content}
                 cur.execute(
                     """INSERT INTO chat_msg (cnsl_id, member_id, cnsler_id, role, msg_data, summary)
@@ -140,7 +147,7 @@ def append_chat_content(
 
 
 def update_cnsl_stat(cnsl_id: int, cnsl_stat: str) -> bool:
-    """cnsl_reg.cnsl_stat 업데이트. C(진행중), D(완료) 등."""
+    """cnsl_reg.cnsl_stat 업데이트. A=예약, C=진행중, D=완료."""
     if not DATABASE_URL or cnsl_id <= 0 or not (cnsl_stat or "").strip():
         return False
     stat = cnsl_stat.strip().upper()
@@ -149,6 +156,20 @@ def update_cnsl_stat(cnsl_id: int, cnsl_stat: str) -> bool:
             cur.execute(
                 "UPDATE cnsl_reg SET cnsl_stat = %s WHERE cnsl_id = %s RETURNING cnsl_id",
                 (stat, cnsl_id),
+            )
+            return cur.fetchone() is not None
+
+
+def update_cnsl_todo_yn(cnsl_id: int, todo_yn: str) -> bool:
+    """cnsl_reg.cnsl_todo_yn 업데이트. 마지막 채팅이 상담자(member)일 때 N으로 설정."""
+    if not DATABASE_URL or cnsl_id <= 0 or not (todo_yn or "").strip():
+        return False
+    yn = (todo_yn or "N").strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE cnsl_reg SET cnsl_todo_yn = %s WHERE cnsl_id = %s RETURNING cnsl_id",
+                (yn, cnsl_id),
             )
             return cur.fetchone() is not None
 
@@ -164,10 +185,15 @@ def upsert_chat_msg_summary(
     """
     chat_msg에 summary + msg_data.content 전체 업데이트(추가 아님).
     summary 컬럼에 JSON 저장: {"summary": "300자 요약", "summary_line": "한 줄 문장"}
+    마지막 메시지가 상담자(user)면 cnsl_todo_yn = N
     """
     if not DATABASE_URL or cnsl_id <= 0:
         return None
-    msg_data = {"content": msg_data_content if isinstance(msg_data_content, list) else []}
+    content_list = msg_data_content if isinstance(msg_data_content, list) else []
+    last_speaker = (content_list[-1].get("speaker") or "").lower() if content_list else ""
+    if last_speaker == "user":
+        update_cnsl_todo_yn(cnsl_id, "N")
+    msg_data = {"content": content_list}
     msg_data_json = json.dumps(msg_data, ensure_ascii=False)
     summary_payload = {"summary": (summary or "")[:300], "summary_line": (summary_line or "").strip()}
     summary_json = json.dumps(summary_payload, ensure_ascii=False)
