@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from dotenv import load_dotenv
 import psycopg2
 from psycopg2 import pool
+from psycopg2.pool import PoolError
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -35,23 +36,35 @@ def get_conn():
     """풀에서 연결 획득 후 반환. 연결 소진 시 fallback으로 직접 연결."""
     p = _get_pool()
     conn = None
+    from_pool = False
     try:
         if p:
-            conn = p.getconn()
+            try:
+                conn = p.getconn()
+                from_pool = True
+            except PoolError:
+                conn = psycopg2.connect(DATABASE_URL) if DATABASE_URL else None
         else:
-            conn = psycopg2.connect(DATABASE_URL)
-        yield conn
-        conn.commit()
+            conn = psycopg2.connect(DATABASE_URL) if DATABASE_URL else None
+        if conn:
+            yield conn
+            conn.commit()
     except Exception:
         if conn:
             conn.rollback()
         raise
     finally:
         if conn:
-            if p:
+            if from_pool and p:
                 try:
                     p.putconn(conn)
                 except Exception:
-                    conn.close()
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
             else:
-                conn.close()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
