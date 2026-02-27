@@ -2,32 +2,15 @@
 ai_msg 테이블 접근.
 스키마: ai_id(PK), cnsl_id, member_id(varchar), msg_data(jsonb), summary(text), created_at, updated_at
 cnsl_id당 1행, msg_data = { "content": [ { "speaker": "user"|"ai", "text": "...", "type": "chat", "timestamp": 123 } ] }
+연결 풀 사용 (db_pool) - 53300 연결 슬롯 소진 방지.
 """
 import json
-import os
 import time
-from contextlib import contextmanager
 from typing import Optional
 
-from dotenv import load_dotenv
-import psycopg2
 from psycopg2.extras import RealDictCursor
 
-load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-
-@contextmanager
-def get_conn():
-    conn = psycopg2.connect(DATABASE_URL)
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+from db_pool import DATABASE_URL, get_conn
 
 
 def member_exists_by_email(email: str) -> bool:

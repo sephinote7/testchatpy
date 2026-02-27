@@ -40,6 +40,9 @@ uvicorn app:app --reload
 4. Start: `uvicorn app:app --host 0.0.0.0 --port $PORT`
 5. 환경 변수: `OPENAI_API_KEY` (필수), `DATABASE_URL` (AI 상담 사용 시 필수)
 
+**53300 연결 슬롯 소진 방지**: Supabase 사용 시 `DATABASE_URL`에 **Pooler URL(포트 6543)** 사용을 권장합니다.  
+Supabase 대시보드 → Settings → Database → Connection string → URI (Transaction pooler)
+
 배포된 URL 하나로:
 - testchat 프론트의 요약 API 주소 → 동일 URL (STT/요약)
 - pjt-gmss 프론트의 `VITE_AI_CHAT_API_URL` → 동일 URL (AI 상담 GET/POST)

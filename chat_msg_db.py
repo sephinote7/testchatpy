@@ -3,32 +3,15 @@ chat_msg 테이블 접근 (화상상담 채팅용).
 스키마: chat_id(PK), cnsl_id, member_id, cnsler_id, role, msg_data(jsonb), summary, created_at
 cnsl_id당 1행, msg_data.content = [ { speaker, text, type, timestamp }, ... ]
 Spring CnslChatController와 동일한 구조.
+연결 풀 사용 (db_pool) - 53300 연결 슬롯 소진 방지.
 """
 import json
-import os
 import time
-from contextlib import contextmanager
 from typing import Optional
 
-from dotenv import load_dotenv
-import psycopg2
 from psycopg2.extras import RealDictCursor
 
-load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-
-@contextmanager
-def get_conn():
-    conn = psycopg2.connect(DATABASE_URL)
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+from db_pool import DATABASE_URL, get_conn
 
 
 def cnsl_reg_exists(cnsl_id: int) -> bool:
@@ -97,22 +80,29 @@ def append_chat_content(
         "type": "chat",
         "timestamp": int(time.time() * 1000),
     }
-
-    existing = get_chat_msg_by_cnsl(cnsl_id)
     role_val = (request_role or "user").strip().lower() or "user"
 
-    if existing:
-        msg_data = existing.get("msg_data") or {}
-        content = msg_data.get("content")
-        if not isinstance(content, list):
-            content = []
-        content = list(content)
-        content.append(entry)
-        msg_data = dict(msg_data)
-        msg_data["content"] = content
+    # 단일 연결로 조회+갱신 (연결 수 최소화)
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """SELECT chat_id, cnsl_id, member_id, cnsler_id, role, msg_data, summary, created_at
+                   FROM chat_msg WHERE cnsl_id = %s ORDER BY created_at ASC LIMIT 1""",
+                (cnsl_id,),
+            )
+            existing = cur.fetchone()
+            existing = dict(existing) if existing else None
 
-        with get_conn() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if existing:
+                msg_data = existing.get("msg_data") or {}
+                content = msg_data.get("content")
+                if not isinstance(content, list):
+                    content = []
+                content = list(content)
+                content.append(entry)
+                msg_data = dict(msg_data)
+                msg_data["content"] = content
+
                 updates = ["msg_data = %s::jsonb"]
                 params = [json.dumps(msg_data, ensure_ascii=False)]
                 if summary_val:
@@ -129,12 +119,9 @@ def append_chat_content(
                     params,
                 )
                 row = cur.fetchone()
-        return dict(row)
-    else:
-        content = [entry]
-        msg_data = {"content": content}
-        with get_conn() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            else:
+                content = [entry]
+                msg_data = {"content": content}
                 cur.execute(
                     """INSERT INTO chat_msg (cnsl_id, member_id, cnsler_id, role, msg_data, summary)
                        VALUES (%s, %s, %s, %s, %s::jsonb, %s)
@@ -149,7 +136,7 @@ def append_chat_content(
                     ),
                 )
                 row = cur.fetchone()
-        return dict(row)
+            return dict(row)
 
 
 def update_cnsl_stat(cnsl_id: int, cnsl_stat: str) -> bool:
