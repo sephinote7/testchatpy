@@ -49,8 +49,8 @@ def _validate_cnsl_access(cnsl_id: int, current_email: str) -> None:
 def _flatten_to_frontend_format(row: dict, member_id: str, cnsler_id: str) -> list:
     """
     chat_msg 1행(msg_data.content 배열)을 프론트엔드용 flat 리스트로 변환.
-    Spring GET은 row 단위 반환이나, 프론트는 message 단위를 기대.
-    content 내 비정상 항목(문자열, "화상 상담 세션" 등)은 건너뜀.
+    각 항목: chatId, cnslId, cnslerId, memberId, createdAt, summary, content
+    content 내 비정상 항목(문자열 등)은 건너뜀.
     """
     if not row:
         return []
@@ -59,6 +59,8 @@ def _flatten_to_frontend_format(row: dict, member_id: str, cnsler_id: str) -> li
     if not isinstance(content, list):
         return []
     chat_id = row.get("chat_id")
+    cnsl_id = row.get("cnsl_id")
+    summary = row.get("summary") or ""
     out = []
     for idx, item in enumerate(content):
         if not isinstance(item, dict):
@@ -71,12 +73,14 @@ def _flatten_to_frontend_format(row: dict, member_id: str, cnsler_id: str) -> li
         role = "counselor" if speaker in ("cnsler", "counselor") else "user"
         out.append({
             "chatId": f"{chat_id}-{idx}" if chat_id else f"msg-{ts or idx}",
-            "role": role,
-            "content": text,
-            "memberId": member_id,
+            "cnslId": cnsl_id,
             "cnslerId": cnsler_id,
+            "memberId": member_id,
             "createdAt": ts,
             "created_at": ts,
+            "summary": summary,
+            "content": text,
+            "role": role,
         })
     return out
 
@@ -173,17 +177,19 @@ async def patch_cnsl_stat(
     body: PatchStatBody,
     member_id: str = Depends(get_member_email),
 ):
-    """cnsl_reg.cnsl_stat 업데이트. C=진행중, D=완료."""
+    """cnsl_reg.cnsl_stat 업데이트. C=진행중, D=완료만 허용."""
     if not DATABASE_URL:
         raise HTTPException(status_code=503, detail="서비스를 일시적으로 사용할 수 없습니다.")
     _validate_cnsl_access(cnsl_id, member_id)
-    stat = (body.cnslStat or "").strip()
+    stat = (body.cnslStat or "").strip().upper()
     if not stat:
         raise HTTPException(status_code=400, detail="cnslStat 필수")
+    if stat not in ("C", "D"):
+        raise HTTPException(status_code=400, detail="cnslStat은 C(진행중) 또는 D(완료)만 허용됩니다.")
     ok = update_cnsl_stat(cnsl_id, stat)
     if not ok:
         raise HTTPException(status_code=500, detail="상태 업데이트 실패")
-    return {"cnslId": cnsl_id, "cnslStat": stat.upper()}
+    return {"cnslId": cnsl_id, "cnslStat": stat}
 
 
 class PostSummaryFullBody(BaseModel):
