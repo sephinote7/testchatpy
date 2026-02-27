@@ -26,16 +26,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="화상채팅 음성 요약 API", lifespan=lifespan)
 
 # CORS 설정: credentials 사용 시 allow_origins는 "*" 불가 → 구체적 origin 목록 필요
+_required_origins = [
+    "https://testchat-alpha.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
 _cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
-_cors_list = [o.strip() for o in _cors_origins.split(",") if o.strip()]
-if not _cors_list:
-    _cors_list = [
-        "https://testchat-alpha.vercel.app",
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ]
+_extra = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+_cors_list = list(dict.fromkeys(_required_origins + _extra))  # 중복 제거, 필수 origin 우선
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_list,
