@@ -56,6 +56,7 @@ app.include_router(cnsl_chat_router)
 class SummarizeResponse(BaseModel):
     transcript: str | None = None
     summary: str
+    summary_line: str | None = None
     msg_data: list | None = None
 
 @app.get("/")
@@ -134,7 +135,8 @@ async def summarize_audio(
     당신은 상담 데이터를 정리하는 전문가입니다. 
     제공된 [데이터]는 채팅 기록과 음성 인식 결과가 섞여 있습니다.
     1. 시간순으로 배열하되, 중복되거나 의미가 끊긴 문장을 자연스럽게 연결하여 최종 대화록(JSON)을 만드세요.
-    2. 전체 상담 내용을 300자 이내로 요약하세요.
+    2. 전체 상담 내용을 300자 이내로 요약(summary)하세요.
+    3. 전체 내용을 관통하는 한 줄 문장(summary_line)을 작성하세요.
 
     [데이터]
     {json.dumps(all_combined, ensure_ascii=False)}
@@ -144,7 +146,8 @@ async def summarize_audio(
       "reordered_msg": [
         {{"type": "chat|stt", "speaker": "user|cnsler", "text": "...", "timestamp": "..."}}
       ],
-      "summary": "..."
+      "summary": "300자 이내 요약",
+      "summary_line": "한 줄 문장"
     }}
     """
 
@@ -157,15 +160,18 @@ async def summarize_audio(
         res_json = json.loads(completion.choices[0].message.content)
         final_messages = res_json.get("reordered_msg", all_combined)
         final_summary = res_json.get("summary", "요약 생성 실패")
+        final_summary_line = res_json.get("summary_line", "").strip() or None
     except Exception as e:
         print(f"GPT 처리 에러: {e}")
         final_messages = all_combined
         final_summary = "정리 중 오류가 발생했습니다."
+        final_summary_line = None
 
     return SummarizeResponse(
-        transcript="", 
-        summary=final_summary,
-        msg_data=final_messages
+        transcript="",
+        summary=final_summary[:300] if len(final_summary) > 300 else final_summary,
+        summary_line=final_summary_line,
+        msg_data=final_messages,
     )
 
 if __name__ == "__main__":

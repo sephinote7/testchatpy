@@ -174,6 +174,7 @@ async def patch_cnsl_stat(
 
 class PostSummaryFullBody(BaseModel):
     summary: str
+    summary_line: str | None = None
     msg_data: list
 
 
@@ -195,6 +196,7 @@ async def post_summary_full(
         member_email=member_email,
         cnsler_email=cnsler_email,
         summary=body.summary or "",
+        summary_line=body.summary_line,
         msg_data_content=body.msg_data or [],
     )
     if not row:
