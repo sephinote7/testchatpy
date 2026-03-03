@@ -96,6 +96,8 @@ async def get_chat(cnsl_id: int, member_id: str = Depends(get_member_email)):
 class PostChatBody(BaseModel):
     content: str | None = None
     text: str | None = None
+    mbti: str | None = None
+    persona: str | None = None
 
 
 @router.post("/chat/{cnsl_id}")
@@ -111,7 +113,12 @@ async def post_chat(cnsl_id: int, body: PostChatBody, member_id: str = Depends(g
         content_list = []
     history = [{"speaker": x.get("speaker"), "text": x.get("text")} for x in content_list]
     append_message(cnsl_id, member_id, "user", content)
-    ai_text = get_ai_reply(content, history)
+    ai_text = get_ai_reply(
+        content,
+        history,
+        mbti=(body.mbti or "").strip() or None,
+        persona=(body.persona or "").strip() or None,
+    )
     row = append_message(cnsl_id, member_id, "ai", ai_text)
     return _row_to_visual_format(row)
 
