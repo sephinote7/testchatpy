@@ -2,8 +2,7 @@ import os
 import json
 from typing import List, Literal, Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from openai import OpenAI
 
@@ -14,17 +13,8 @@ if not OPENAI_API_KEY:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# ---------- FastAPI 앱 ----------
-app = FastAPI()
-
-# CORS: 필요하면 testchat 프론트 도메인으로 좁혀도 됨
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ---------- APIRouter ----------
+router = APIRouter(prefix="/api", tags=["site-chat"])
 
 
 # ---------- 요청/응답 모델 ----------
@@ -46,16 +36,9 @@ class SiteChatResponse(BaseModel):
     summary: Optional[str] = None
 
 
-# ---------- 헬스체크 ----------
-
-@app.get("/")
-async def root():
-    return {"status": "ok", "service": "testchatpy-site-chat"}
-
-
 # ---------- 고민순삭 홈페이지 전용 챗봇 엔드포인트 ----------
 
-@app.post("/api/site-chat", response_model=SiteChatResponse)
+@router.post("/site-chat", response_model=SiteChatResponse)
 async def site_chat(req: SiteChatRequest):
     """
     고민순삭 홈페이지 전용 챗봇 API.
@@ -64,7 +47,7 @@ async def site_chat(req: SiteChatRequest):
     - 출력: { answer, summary }
     """
 
-    user_message = (req.message or "").trim() if hasattr(str, "trim") else (req.message or "").strip()
+    user_message = (req.message or "").strip()
     if not user_message:
         raise HTTPException(status_code=400, detail="message is empty")
 
