@@ -1,11 +1,12 @@
 """
 화상상담 채팅 API (chat_msg).
-- GET  /api/cnsl/{cnsl_id}/chat : 채팅 메시지 목록 조회 (flattened, Spring 호환)
+- GET  /api/cnsl/{cnsl_id}/chat : 채팅 메시지 목록 조회
 - POST /api/cnsl/{cnsl_id}/chat : 메시지 전송 및 저장
 """
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
+# DB 함수들 임포트
 from chat_msg_db import (
     DATABASE_URL,
     append_chat_content,
@@ -17,11 +18,10 @@ from chat_msg_db import (
     upsert_chat_msg_summary,
 )
 
+# [수정] tags 추가 및 prefix 확인
 router = APIRouter(prefix="/api/cnsl", tags=["cnsl-chat"])
 
-
 def get_member_email(x_user_email: str | None = Header(None, alias="X-User-Email")) -> str:
-    """X-User-Email 필수. member 테이블 존재 여부 검증."""
     email = (x_user_email or "").strip()
     if not email:
         raise HTTPException(status_code=401, detail="X-User-Email 헤더가 필요합니다.")
@@ -29,46 +29,30 @@ def get_member_email(x_user_email: str | None = Header(None, alias="X-User-Email
         raise HTTPException(status_code=401, detail="존재하지 않는 사용자입니다.")
     return email
 
-
 def _validate_cnsl_access(cnsl_id: int, current_email: str) -> None:
-    """cnsl_reg 존재 및 본인 참여 여부 검증."""
     if not cnsl_reg_exists(cnsl_id):
-        raise HTTPException(
-            status_code=404,
-            detail="해당 상담 ID를 찾을 수 없습니다.",
-        )
+        raise HTTPException(status_code=404, detail="해당 상담 ID를 찾을 수 없습니다.")
     reg = get_cnsl_reg(cnsl_id)
     if not reg:
         raise HTTPException(status_code=404, detail="해당 상담 정보를 찾을 수 없습니다.")
     member_id = reg.get("member_id") or ""
     cnsler_id = reg.get("cnsler_id") or ""
     if current_email != member_id and current_email != cnsler_id:
-        raise HTTPException(status_code=403, detail="해당 상담에 대한 접근 권한이 없습니다.")
-
+        raise HTTPException(status_code=403, detail="접근 권한이 없습니다.")
 
 def _flatten_to_frontend_format(row: dict, member_id: str, cnsler_id: str) -> list:
-    """
-    chat_msg 1행(msg_data.content 배열)을 프론트엔드용 flat 리스트로 변환.
-    각 항목: chatId, cnslId, cnslerId, memberId, createdAt, summary, content
-    content 내 비정상 항목(문자열 등)은 건너뜀.
-    """
-    if not row:
-        return []
+    if not row: return []
     msg_data = row.get("msg_data") or {}
     content = msg_data.get("content")
-    if not isinstance(content, list):
-        return []
+    if not isinstance(content, list): return []
     chat_id = row.get("chat_id")
     cnsl_id = row.get("cnsl_id")
     summary = row.get("summary") or ""
     out = []
     for idx, item in enumerate(content):
-        if not isinstance(item, dict):
-            continue
+        if not isinstance(item, dict): continue
         speaker = (item.get("speaker") or "user").lower()
-        text = item.get("text") or ""
-        if not isinstance(text, str):
-            text = str(text) if text is not None else ""
+        text = str(item.get("text") or "")
         ts = item.get("timestamp")
         role = "counselor" if speaker in ("cnsler", "counselor") else "user"
         out.append({
@@ -84,148 +68,82 @@ def _flatten_to_frontend_format(row: dict, member_id: str, cnsler_id: str) -> li
         })
     return out
 
-
 class PostChatBody(BaseModel):
     role: str
     content: str | None = None
     summary: str | None = None
 
+# --- API Endpoints ---
 
-@router.get("/{cnsl_id}/chat")
+@router.get("/{cnsl_id}/chat") # 실제 주소: /api/cnsl/{cnsl_id}/chat
 async def get_chat_messages(cnsl_id: int, member_id: str = Depends(get_member_email)):
-    """채팅 메시지 목록 조회. flattened format (프론트엔드 호환)."""
     if not DATABASE_URL:
-        raise HTTPException(status_code=503, detail="서비스를 일시적으로 사용할 수 없습니다.")
+        raise HTTPException(status_code=503, detail="DB 연결 설정이 없습니다.")
     _validate_cnsl_access(cnsl_id, member_id)
     reg = get_cnsl_reg(cnsl_id)
-    member_email = reg.get("member_id") or ""
-    cnsler_email = reg.get("cnsler_id") or ""
-    try:
-        row = get_chat_msg_by_cnsl(cnsl_id)
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"DB 조회 실패: {str(e)}")
-    if not row:
-        return []
-    try:
-        flat = _flatten_to_frontend_format(row, member_email, cnsler_email)
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"msg_data 변환 실패: {str(e)}")
-    return flat
-
+    row = get_chat_msg_by_cnsl(cnsl_id)
+    if not row: return []
+    return _flatten_to_frontend_format(row, reg.get("member_id"), reg.get("cnsler_id"))
 
 @router.post("/{cnsl_id}/chat")
-async def post_chat_message(
-    cnsl_id: int,
-    body: PostChatBody,
-    member_id: str = Depends(get_member_email),
-):
-    """채팅 메시지 전송 및 저장. Spring ChatMsgPostResponse 호환 응답."""
-    if not DATABASE_URL:
-        raise HTTPException(status_code=503, detail="서비스를 일시적으로 사용할 수 없습니다.")
+async def post_chat_message(cnsl_id: int, body: PostChatBody, member_id: str = Depends(get_member_email)):
     _validate_cnsl_access(cnsl_id, member_id)
-
     role = (body.role or "").strip().lower()
-    if not role:
-        raise HTTPException(status_code=400, detail="role 필수")
-
     content = (body.content or body.summary or "").strip()
-    summary_val = body.summary.strip() if body.summary and body.summary.strip() else None
-    if role == "summary":
-        summary_val = content
-
+    summary_val = body.summary.strip() if body.summary else None
+    if role == "summary": summary_val = content
+    
     speaker = "cnsler" if role in ("counselor", "cnsler") else "user"
     reg = get_cnsl_reg(cnsl_id)
-    member_email = reg.get("member_id") or ""
-    cnsler_email = reg.get("cnsler_id") or ""
-
+    
     row = append_chat_content(
         cnsl_id=cnsl_id,
-        member_email=member_email,
-        cnsler_email=cnsler_email,
+        member_email=reg.get("member_id"),
+        cnsler_email=reg.get("cnsler_id"),
         speaker=speaker,
         text=content,
         summary_val=summary_val,
         request_role=role,
     )
-
     created = row.get("created_at")
-    if hasattr(created, "isoformat"):
-        created = created.isoformat()
-
+    if hasattr(created, "isoformat"): created = created.isoformat()
     return {
         "chatId": row.get("chat_id"),
         "cnslId": row.get("cnsl_id"),
-        "cnslerId": row.get("cnsler_id"),
-        "memberId": row.get("member_id"),
         "createdAt": created,
-        "created_at": created,
         "msg_data": row.get("msg_data"),
     }
-
 
 class PatchStatBody(BaseModel):
     cnslStat: str
 
-
 @router.patch("/{cnsl_id}/stat")
-async def patch_cnsl_stat(
-    cnsl_id: int,
-    body: PatchStatBody,
-    member_id: str = Depends(get_member_email),
-):
-    """cnsl_reg.cnsl_stat 업데이트. C=진행중, D=완료만 허용."""
-    if not DATABASE_URL:
-        raise HTTPException(status_code=503, detail="서비스를 일시적으로 사용할 수 없습니다.")
+async def patch_cnsl_stat(cnsl_id: int, body: PatchStatBody, member_id: str = Depends(get_member_email)):
     _validate_cnsl_access(cnsl_id, member_id)
     stat = (body.cnslStat or "").strip().upper()
-    if not stat:
-        raise HTTPException(status_code=400, detail="cnslStat 필수")
     if stat not in ("C", "D"):
-        raise HTTPException(status_code=400, detail="cnslStat은 C(진행중) 또는 D(완료)만 허용됩니다.")
-    ok = update_cnsl_stat(cnsl_id, stat)
-    if not ok:
-        raise HTTPException(status_code=500, detail="상태 업데이트 실패")
+        raise HTTPException(status_code=400, detail="C 또는 D만 가능합니다.")
+    if not update_cnsl_stat(cnsl_id, stat):
+        raise HTTPException(status_code=500, detail="업데이트 실패")
     return {"cnslId": cnsl_id, "cnslStat": stat}
-
 
 class PostSummaryFullBody(BaseModel):
     summary: str
     summary_line: str | None = None
     msg_data: list
 
-
 @router.post("/{cnsl_id}/chat/summary-full")
-async def post_summary_full(
-    cnsl_id: int,
-    body: PostSummaryFullBody,
-    member_id: str = Depends(get_member_email),
-):
-    """STT+chat 통합 msg_data + summary 저장. 기존 content 덮어쓰기."""
-    if not DATABASE_URL:
-        raise HTTPException(status_code=503, detail="서비스를 일시적으로 사용할 수 없습니다.")
+async def post_summary_full(cnsl_id: int, body: PostSummaryFullBody, member_id: str = Depends(get_member_email)):
     _validate_cnsl_access(cnsl_id, member_id)
     reg = get_cnsl_reg(cnsl_id)
-    member_email = reg.get("member_id") or ""
-    cnsler_email = reg.get("cnsler_id") or ""
     row = upsert_chat_msg_summary(
         cnsl_id=cnsl_id,
-        member_email=member_email,
-        cnsler_email=cnsler_email,
-        summary=body.summary or "",
+        member_email=reg.get("member_id"),
+        cnsler_email=reg.get("cnsler_id"),
+        summary=body.summary,
         summary_line=body.summary_line,
-        msg_data_content=body.msg_data or [],
+        msg_data_content=body.msg_data,
     )
-    if not row:
-        raise HTTPException(status_code=500, detail="저장 실패")
     created = row.get("created_at")
-    if hasattr(created, "isoformat"):
-        created = created.isoformat()
-    return {
-        "chatId": row.get("chat_id"),
-        "cnslId": cnsl_id,
-        "createdAt": created,
-    }
+    if hasattr(created, "isoformat"): created = created.isoformat()
+    return {"chatId": row.get("chat_id"), "cnslId": cnsl_id, "createdAt": created}
