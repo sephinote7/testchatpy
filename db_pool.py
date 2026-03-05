@@ -14,20 +14,25 @@ from psycopg2.pool import PoolError
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# 연결 풀 설정: 무료 플랜 환경에 맞춰 타이트하게 관리
+# 연결 풀 설정: 무료 플랜 환경에 맞춰 **최소한의 커넥션만** 사용
 _connection_pool = None
 
 def _get_pool():
+    """
+    Supabase 무료 플랜에서 연결 슬롯 고갈(53300) 방지를 위해
+    아주 작은 풀(min=1, max=5)만 유지한다.
+    - maxconn을 크게 잡으면 Render + 다른 툴들이 동시에 붙을 때
+      금방 전체 슬롯을 소모해 버리므로 5 이하로 제한.
+    """
     global _connection_pool
     if _connection_pool is None and DATABASE_URL:
         try:
-            # ThreadedConnectionPool을 사용하여 멀티스레드 환경 대응
             _connection_pool = pool.ThreadedConnectionPool(
-                minconn=2,
-                maxconn=35,  # 무료 플랜 권장치
+                minconn=1,
+                maxconn=5,
                 dsn=DATABASE_URL,
             )
-            print("DB Connection Pool 생성 성공")
+            print("DB Connection Pool 생성 성공 (min=1, max=5)")
         except Exception as e:
             print(f"DB 풀 생성 실패: {e}")
     return _connection_pool
