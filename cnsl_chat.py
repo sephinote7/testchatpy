@@ -75,10 +75,19 @@ class PostChatBody(BaseModel):
 
 # --- API Endpoints ---
 
-@router.get("/{cnsl_id}/chat") # 실제 주소: /api/cnsl/{cnsl_id}/chat
+@router.get("/{cnsl_id}/chat")
 async def get_chat_messages(cnsl_id: int, member_id: str = Depends(get_member_email)):
+    # 1. 먼저 상담 정보를 가져옵니다.
+    reg = get_cnsl_reg(cnsl_id)
+    if not reg:
+        raise HTTPException(status_code=404, detail="상담 정보를 찾을 수 없습니다.")
+    
+    # 2. 채팅 메시지 목록을 가져옵니다.
     row = get_chat_msg_by_cnsl(cnsl_id)
-    if not row: return []
+    if not row: 
+        return []
+        
+    # 3. 이제 정의된 reg 변수를 사용합니다.
     return _flatten_to_frontend_format(row, reg.get("member_id"), reg.get("cnsler_id"))
 
 @router.post("/{cnsl_id}/chat")
