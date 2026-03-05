@@ -77,10 +77,6 @@ class PostChatBody(BaseModel):
 
 @router.get("/{cnsl_id}/chat") # 실제 주소: /api/cnsl/{cnsl_id}/chat
 async def get_chat_messages(cnsl_id: int, member_id: str = Depends(get_member_email)):
-    if not DATABASE_URL:
-        raise HTTPException(status_code=503, detail="DB 연결 설정이 없습니다.")
-    _validate_cnsl_access(cnsl_id, member_id)
-    reg = get_cnsl_reg(cnsl_id)
     row = get_chat_msg_by_cnsl(cnsl_id)
     if not row: return []
     return _flatten_to_frontend_format(row, reg.get("member_id"), reg.get("cnsler_id"))
