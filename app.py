@@ -21,11 +21,25 @@ def get_openai_client() -> OpenAI:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 시작 시 로직이 필요하면 여기에 작성
     yield
 
 app = FastAPI(title="화상채팅 음성 요약 API", lifespan=lifespan)
 
-# CORS 설정: credentials 사용 시 allow_origins는 "*" 불가 → 구체적 origin 목록 필요
+# --- [수정 포인트 1] 고정 엔드포인트를 라우터보다 먼저 선언 ---
+# 이렇게 해야 외부 라우터의 경로 매칭 간섭을 받지 않습니다.
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    """Render 헬스체크용: 최상단에 위치하여 즉시 응답 유도"""
+    return {"status": "ok"}
+
+@app.get("/")
+async def root():
+    return {"status": "running"}
+
+
+# --- [수정 포인트 2] CORS 설정 최적화 ---
 _required_origins = [
     "https://testchat-alpha.vercel.app",
     "http://localhost:5173",
@@ -35,7 +49,8 @@ _required_origins = [
 ]
 _cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
 _extra = [o.strip() for o in _cors_origins.split(",") if o.strip()]
-_cors_list = list(dict.fromkeys(_required_origins + _extra))  # 중복 제거, 필수 origin 우선
+_cors_list = list(dict.fromkeys(_required_origins + _extra))
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_list,
@@ -45,35 +60,28 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+
+# --- [수정 포인트 3] 라우터 포함 순서 확인 ---
+# 만약 cnsl_chat_router 내부에 /api/cnsl/{cnsl_id}/chat 경로가 있다면 
+# 해당 파일 내부의 @router.get() 경로 설정을 다시 확인해야 합니다.
+
 from ai_chat import history_router, router as ai_chat_router
 from cnsl_chat import router as cnsl_chat_router
 from chatbot import router as site_chat_router
 
-# history 라우트를 {cnsl_id}보다 먼저 매칭되도록 먼저 include
 app.include_router(history_router)
 app.include_router(ai_chat_router)
 app.include_router(cnsl_chat_router)
 app.include_router(site_chat_router)
+
+
+# --- 데이터 모델 및 비즈니스 로직 ---
 
 class SummarizeResponse(BaseModel):
     transcript: str | None = None
     summary: str
     summary_line: str | None = None
     msg_data: list | None = None
-
-
-@app.get("/healthz", include_in_schema=False)
-async def healthz():
-    """
-    Render /healthz 헬스체크용 엔드포인트.
-    DB 등 외부 의존성까지 확인하려면 이 안에서 간단한 쿼리를 추가할 수도 있지만,
-    현재는 애플리케이션 프로세스가 살아있는지만 확인하도록 둔다.
-    """
-    return {"status": "ok"}
-
-@app.get("/")
-async def root():
-    return {"status": "running"}
 
 @app.post("/api/summarize", response_model=SummarizeResponse)
 async def summarize_audio(
@@ -84,7 +92,6 @@ async def summarize_audio(
     client = get_openai_client()
     chat_messages = []
     
-    # 1. 채팅 로그 파싱
     if msg_data:
         try:
             chat_messages = json.loads(msg_data)
@@ -92,37 +99,30 @@ async def summarize_audio(
             print(f"채팅 파싱 에러: {e}")
             chat_messages = []
 
-    # 상담 시작 기준 시간 설정 (정렬의 기준점)
     base_time = int(chat_messages[0].get('timestamp', time.time() * 1000)) if chat_messages else int(time.time() * 1000)
 
-    # 2. 상세 STT 처리 함수 (segments 추출)
     def _get_stt_with_time(upload: UploadFile | None, speaker: str) -> list:
         if not upload or not upload.filename:
-            print(f"[{speaker}] 음성 파일이 전송되지 않았습니다.")
             return []
         try:
             content = upload.file.read()
             if not content:
-                print(f"[{speaker}] 음성 파일 크기 0바이트, STT 생략")
                 return []
             
             bio = io.BytesIO(content)
             bio.name = "audio.webm" 
             
-            # verbose_json을 사용하여 문장별 시작 시간 획득
             resp = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=bio,
                 response_format="verbose_json"
             )
 
-            # 응답 데이터에서 segments 안전하게 추출
             stt_data = resp if isinstance(resp, dict) else resp.model_dump()
             segments = stt_data.get('segments', [])
             
             results = []
             for seg in segments:
-                # 시작 초(seg['start'])를 밀리초로 변환하여 기준 시각에 더함
                 msg_time = base_time + int(seg.get('start', 0) * 1000)
                 results.append({
                     "type": "stt",
@@ -130,47 +130,32 @@ async def summarize_audio(
                     "text": seg.get('text', '').strip(),
                     "timestamp": str(msg_time)
                 })
-            print(f"[{speaker}] STT 완료: {len(results)} 문장")
             return results
         except Exception as e:
             print(f"[{speaker}] STT 에러: {e}")
             return []
 
-    # 3. 화자별 음성 인식 실행
     user_stt_list = _get_stt_with_time(audio_user, "user")
     cnsler_stt_list = _get_stt_with_time(audio_cnsler, "cnsler")
 
-    # 4. 모든 메시지 통합 및 1차 정렬
     all_combined = chat_messages + user_stt_list + cnsler_stt_list
     all_combined.sort(key=lambda x: int(x.get('timestamp', 0)))
 
-    # 5. GPT를 통한 대화 정제 및 요약
     prompt = f"""
     당신은 상담 데이터를 정리하는 전문가입니다.
     제공된 [데이터]는 채팅 기록과 음성 인식 결과가 섞여 있습니다.
-
-    다음 세 가지를 수행하세요.
-
-    1. reordered_msg: 시간순으로 배열하되, 중복되거나 의미가 끊긴 문장을 자연스럽게 연결한 최종 대화록 배열.
-
-    2. summary: 전체 상담 내용을 **한글 문장 형태로 요약**하여 300자 이내로 작성하세요.
-       - 단순 발언 나열이나 단어 자르기가 아니라, "고객이 ~라고 인사하고, ~라고 소개했습니다. 상담자는 ~했습니다."처럼 서술형 요약.
-       - 예: "고객이 상담을 시작하며 '안녕하세요'라고 인사하고, 자신을 'OOO'라고 소개했습니다. 그러나 마지막 발언은 명확한 의미가 없어 상담이 잘 진행되지 않았습니다."
-       - 반드시 300자를 넘지 마세요. 넘기면 문장을 줄여서 300자 이내로 마치세요.
-
-    3. summary_line: 전체 상담의 **핵심이 되는 내용**을 한 문장으로 요약하세요.
-       - 예: "상담이 시작되었으나 고객의 발언이 불명확하여 진행에 어려움이 있었습니다."
+    1. reordered_msg: 시간순 대화록 배열.
+    2. summary: 서술형 요약(300자 이내).
+    3. summary_line: 핵심 한 줄 요약.
 
     [데이터]
     {json.dumps(all_combined, ensure_ascii=False)}
 
     응답 형식(JSON만 출력):
     {{
-      "reordered_msg": [
-        {{"type": "chat|stt", "speaker": "user|cnsler", "text": "...", "timestamp": "..."}}
-      ],
-      "summary": "서술형 요약문 300자 이내",
-      "summary_line": "핵심 한 줄 문장"
+      "reordered_msg": [...],
+      "summary": "...",
+      "summary_line": "..."
     }}
     """
 
@@ -190,17 +175,19 @@ async def summarize_audio(
         final_summary = "정리 중 오류가 발생했습니다."
         final_summary_line = None
 
-    # summary는 요약문이므로 300자 초과 시 마지막 문장만 자르지 않고, 앞부분을 유지해 300자로 제한
     summary_ok = (final_summary or "").strip()
     if len(summary_ok) > 300:
-        summary_ok = summary_ok[:297].rstrip() + "…" if len(summary_ok) > 297 else summary_ok[:300]
+        summary_ok = summary_ok[:297].rstrip() + "…"
+        
     return SummarizeResponse(
         transcript="",
         summary=summary_ok or "요약 없음",
-        summary_line=(final_summary_line or "").strip() or None,
+        summary_line=final_summary_line,
         msg_data=final_messages,
     )
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    # Render 환경의 PORT 대응
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
