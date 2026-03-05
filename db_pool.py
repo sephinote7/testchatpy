@@ -7,6 +7,7 @@ import time
 from contextlib import contextmanager
 
 from dotenv import load_dotenv
+from fastapi import HTTPException
 import psycopg2
 from psycopg2 import pool
 from psycopg2.pool import PoolError
@@ -19,20 +20,18 @@ _connection_pool = None
 
 def _get_pool():
     """
-    Supabase 무료 플랜에서 연결 슬롯 고갈(53300) 방지를 위해
-    아주 작은 풀(min=1, max=5)만 유지한다.
-    - maxconn을 크게 잡으면 Render + 다른 툴들이 동시에 붙을 때
-      금방 전체 슬롯을 소모해 버리므로 5 이하로 제한.
+    Supabase 무료 플랜에서 연결 슬롯 고갈(53300) 방지를 막기 위해
+    비교적 작은 풀(min=1, max=10)만 유지한다.
     """
     global _connection_pool
     if _connection_pool is None and DATABASE_URL:
         try:
             _connection_pool = pool.ThreadedConnectionPool(
                 minconn=1,
-                maxconn=5,
+                maxconn=10,
                 dsn=DATABASE_URL,
             )
-            print("DB Connection Pool 생성 성공 (min=1, max=5)")
+            print("DB Connection Pool 생성 성공 (min=1, max=10)")
         except Exception as e:
             print(f"DB 풀 생성 실패: {e}")
     return _connection_pool
@@ -55,7 +54,11 @@ def get_conn():
             conn.commit()
     except PoolError:
         print("DB Pool이 가득 찼습니다. 잠시 후 다시 시도하세요.")
-        raise RuntimeError("현재 접속자가 많아 처리가 지연되고 있습니다.")
+        # FastAPI가 503으로 응답하도록 HTTPException 사용
+        raise HTTPException(
+            status_code=503,
+            detail="현재 접속자가 많아 처리가 지연되고 있습니다. 잠시 후 다시 시도해 주세요.",
+        )
     except Exception as e:
         if conn:
             conn.rollback()
