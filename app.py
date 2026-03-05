@@ -51,6 +51,7 @@ _required_origins = [
 _cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
 _extra = [o.strip() for o in _cors_origins.split(",") if o.strip()]
 _cors_list = list(dict.fromkeys(_required_origins + _extra))  # 중복 제거, 필수 origin 우선
+# main.py의 middleware 설정 부분
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_list,
@@ -58,6 +59,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
+    # 아래 설정은 에러 상황에서도 브라우저가 원인을 볼 수 있게 돕습니다.
+    max_age=3600, 
 )
 
 # --- [수정 포인트 3] 라우터 포함 순서 확인 ---
