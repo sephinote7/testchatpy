@@ -43,18 +43,35 @@ def get_cnsl_reg(cnsl_id: int) -> Optional[dict]:
 
 
 def get_chat_msg_by_cnsl(cnsl_id: int) -> Optional[dict]:
-    """cnsl_id에 해당하는 chat_msg 1건 조회 (created_at 오름차순 첫 행)."""
+    """
+    cnsl_id에 해당하는 chat_msg를 모두 조회해 content를 병합한 1건 반환.
+    여러 행이 있으면 msg_data.content를 타임스탬프 기준 정렬해 하나로 합침.
+    """
     if not DATABASE_URL or cnsl_id <= 0:
         return None
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """SELECT chat_id, cnsl_id, member_id, cnsler_id, role, msg_data, summary, created_at
-                   FROM chat_msg WHERE cnsl_id = %s ORDER BY created_at ASC LIMIT 1""",
+                   FROM chat_msg WHERE cnsl_id = %s ORDER BY created_at ASC""",
                 (cnsl_id,),
             )
-            row = cur.fetchone()
-            return dict(row) if row else None
+            rows = cur.fetchall()
+    if not rows:
+        return None
+    rows = [dict(r) for r in rows]
+    first, rest = rows[0], rows[1:]
+    all_content = list((first.get("msg_data") or {}).get("content") or [])
+    if not isinstance(all_content, list):
+        all_content = []
+    for r in rest:
+        content = (r.get("msg_data") or {}).get("content")
+        if isinstance(content, list):
+            all_content.extend(content)
+    all_content.sort(key=lambda x: int(x.get("timestamp") or 0))
+    out = dict(first)
+    out["msg_data"] = {"content": all_content}
+    return out
 
 
 def append_chat_content(
@@ -184,8 +201,8 @@ def upsert_chat_msg_summary(
 ) -> Optional[dict]:
     """
     chat_msg에 summary + msg_data.content 전체 업데이트(추가 아님).
+    cnsl_id당 여러 행이 있으면 created_at 오름차순 첫 행만 갱신해 중복 방지.
     summary 컬럼에 JSON 저장: {"summary": "300자 요약", "summary_line": "한 줄 문장"}
-    마지막 메시지가 상담자(user)면 cnsl_todo_yn = N
     """
     if not DATABASE_URL or cnsl_id <= 0:
         return None
@@ -201,7 +218,7 @@ def upsert_chat_msg_summary(
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """UPDATE chat_msg SET msg_data = %s::jsonb, summary = %s
-                   WHERE cnsl_id = %s
+                   WHERE chat_id = (SELECT chat_id FROM chat_msg WHERE cnsl_id = %s ORDER BY created_at ASC LIMIT 1)
                    RETURNING chat_id, cnsl_id, member_id, cnsler_id, role, msg_data, summary, created_at""",
                 (msg_data_json, summary_json, cnsl_id),
             )
