@@ -40,6 +40,7 @@ async def root():
 
 
 # --- [수정 포인트 2] CORS 설정 최적화 ---
+# CORS 설정: credentials 사용 시 allow_origins는 "*" 불가 → 구체적 origin 목록 필요
 _required_origins = [
     "https://testchat-alpha.vercel.app",
     "http://localhost:5173",
@@ -49,8 +50,7 @@ _required_origins = [
 ]
 _cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
 _extra = [o.strip() for o in _cors_origins.split(",") if o.strip()]
-_cors_list = list(dict.fromkeys(_required_origins + _extra))
-
+_cors_list = list(dict.fromkeys(_required_origins + _extra))  # 중복 제거, 필수 origin 우선
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_list,
@@ -59,7 +59,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
-
 
 # --- [수정 포인트 3] 라우터 포함 순서 확인 ---
 # 만약 cnsl_chat_router 내부에 /api/cnsl/{cnsl_id}/chat 경로가 있다면 
