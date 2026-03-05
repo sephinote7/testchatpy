@@ -24,7 +24,7 @@ def _get_pool():
             # ThreadedConnectionPool을 사용하여 멀티스레드 환경 대응
             _connection_pool = pool.ThreadedConnectionPool(
                 minconn=2,
-                maxconn=20,  # 무료 플랜 권장치
+                maxconn=35,  # 무료 플랜 권장치
                 dsn=DATABASE_URL,
             )
             print("DB Connection Pool 생성 성공")
