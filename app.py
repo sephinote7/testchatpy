@@ -61,6 +61,16 @@ class SummarizeResponse(BaseModel):
     summary_line: str | None = None
     msg_data: list | None = None
 
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    """
+    Render /healthz 헬스체크용 엔드포인트.
+    DB 등 외부 의존성까지 확인하려면 이 안에서 간단한 쿼리를 추가할 수도 있지만,
+    현재는 애플리케이션 프로세스가 살아있는지만 확인하도록 둔다.
+    """
+    return {"status": "ok"}
+
 @app.get("/")
 async def root():
     return {"status": "running"}
