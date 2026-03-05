@@ -92,7 +92,9 @@ async def summarize_audio(
             return []
         try:
             content = upload.file.read()
-            if not content: return []
+            if not content:
+                print(f"[{speaker}] 음성 파일 크기 0바이트, STT 생략")
+                return []
             
             bio = io.BytesIO(content)
             bio.name = "audio.webm" 
