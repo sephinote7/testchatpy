@@ -134,22 +134,31 @@ async def summarize_audio(
 
     # 5. GPT를 통한 대화 정제 및 요약
     prompt = f"""
-    당신은 상담 데이터를 정리하는 전문가입니다. 
+    당신은 상담 데이터를 정리하는 전문가입니다.
     제공된 [데이터]는 채팅 기록과 음성 인식 결과가 섞여 있습니다.
-    1. 시간순으로 배열하되, 중복되거나 의미가 끊긴 문장을 자연스럽게 연결하여 최종 대화록(JSON)을 만드세요.
-    2. 전체 상담 내용을 300자 이내로 요약(summary)하세요.
-    3. 전체 내용을 관통하는 한 줄 문장(summary_line)을 작성하세요.
+
+    다음 세 가지를 수행하세요.
+
+    1. reordered_msg: 시간순으로 배열하되, 중복되거나 의미가 끊긴 문장을 자연스럽게 연결한 최종 대화록 배열.
+
+    2. summary: 전체 상담 내용을 **한글 문장 형태로 요약**하여 300자 이내로 작성하세요.
+       - 단순 발언 나열이나 단어 자르기가 아니라, "고객이 ~라고 인사하고, ~라고 소개했습니다. 상담자는 ~했습니다."처럼 서술형 요약.
+       - 예: "고객이 상담을 시작하며 '안녕하세요'라고 인사하고, 자신을 'OOO'라고 소개했습니다. 그러나 마지막 발언은 명확한 의미가 없어 상담이 잘 진행되지 않았습니다."
+       - 반드시 300자를 넘지 마세요. 넘기면 문장을 줄여서 300자 이내로 마치세요.
+
+    3. summary_line: 전체 상담의 **핵심이 되는 내용**을 한 문장으로 요약하세요.
+       - 예: "상담이 시작되었으나 고객의 발언이 불명확하여 진행에 어려움이 있었습니다."
 
     [데이터]
     {json.dumps(all_combined, ensure_ascii=False)}
 
-    응답 형식(JSON):
+    응답 형식(JSON만 출력):
     {{
       "reordered_msg": [
         {{"type": "chat|stt", "speaker": "user|cnsler", "text": "...", "timestamp": "..."}}
       ],
-      "summary": "300자 이내 요약",
-      "summary_line": "한 줄 문장"
+      "summary": "서술형 요약문 300자 이내",
+      "summary_line": "핵심 한 줄 문장"
     }}
     """
 
@@ -169,10 +178,14 @@ async def summarize_audio(
         final_summary = "정리 중 오류가 발생했습니다."
         final_summary_line = None
 
+    # summary는 요약문이므로 300자 초과 시 마지막 문장만 자르지 않고, 앞부분을 유지해 300자로 제한
+    summary_ok = (final_summary or "").strip()
+    if len(summary_ok) > 300:
+        summary_ok = summary_ok[:297].rstrip() + "…" if len(summary_ok) > 297 else summary_ok[:300]
     return SummarizeResponse(
         transcript="",
-        summary=final_summary[:300] if len(final_summary) > 300 else final_summary,
-        summary_line=final_summary_line,
+        summary=summary_ok or "요약 없음",
+        summary_line=(final_summary_line or "").strip() or None,
         msg_data=final_messages,
     )
 
