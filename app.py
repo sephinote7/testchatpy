@@ -140,7 +140,7 @@ async def summarize_audio(
                 msg_time = base_time + int(seg.get('start', 0) * 1000)
                 text = (seg.get('text', '') or '').strip()
                 # 무의미한 '.' 같은 구두점/공백만 필터
-                if not text or re.fullmatch(r"[.\-_,\s]+", text) or len(text) <= 1:
+                if not text or text.lower() == "silence" or re.fullmatch(r"[.\-_,\s]+", text) or len(text) <= 1:
                     continue
                 results.append({
                     "type": "stt",
@@ -169,7 +169,7 @@ async def summarize_audio(
             - 이상한 단어/오탈자는 '발음상 근접한 단어'로만 아주 보수적으로 보정합니다.
             - 말끝의 반복, 불필요한 군더더기(어, 음, 그, ...)는 제거해도 됩니다.
             - 출력은 speaker별로 문장 단위로 끊어서 반환하고, timestamp는 해당 문장을 구성한 첫 조각의 timestamp를 사용하세요.
-            - '.' 같은 구두점/한 글자 잡음은 제거하세요.
+            - '.' 같은 구두점/한 글자 잡음, "Silence" 같은 무음 표기는 제거하세요.
 
             입력(JSON):
             {json.dumps(stt_only, ensure_ascii=False)}
@@ -195,7 +195,7 @@ async def summarize_audio(
                     if not isinstance(it, dict):
                         continue
                     t = (it.get("text") or "").strip()
-                    if not t or re.fullmatch(r"[.\-_,\s]+", t) or len(t) <= 1:
+                    if not t or t.lower() == "silence" or re.fullmatch(r"[.\-_,\s]+", t) or len(t) <= 1:
                         continue
                     sp = (it.get("speaker") or "").strip().lower()
                     sp = "cnsler" if sp in ("counselor", "cnsler", "system") else "user"
