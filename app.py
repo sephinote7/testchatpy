@@ -5,6 +5,7 @@ import time
 import logging
 import re
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -87,6 +88,9 @@ class SummarizeResponse(BaseModel):
     summary_line: str | None = None
     msg_data: list | None = None
 
+class _SttRefineResponse(BaseModel):
+    refined_stt: list[dict[str, Any]]
+
 @app.post("/api/summarize", response_model=SummarizeResponse)
 async def summarize_audio(
     audio_user: UploadFile = File(None),
@@ -151,6 +155,59 @@ async def summarize_audio(
 
     user_stt_list = _get_stt_with_time(audio_user, "user")
     cnsler_stt_list = _get_stt_with_time(audio_cnsler, "cnsler")
+
+    # STT 문장 정제: Whisper의 끊긴 조각/불명확 단어를 문장 단위로 다듬되, 의미를 추가로 생성(환각)하지 않도록 제한
+    try:
+        stt_only = user_stt_list + cnsler_stt_list
+        if stt_only:
+            refine_prompt = f"""
+            당신은 한국어 음성 인식(STT) 결과를 '사용자에게 보여줄 대화 문장' 형태로 정제하는 역할입니다.
+
+            규칙:
+            - 입력 STT의 의미를 바꾸거나 새로운 사실/문장을 만들어내지 마세요(환각 금지).
+            - 가능한 경우 끊긴 조각을 자연스러운 문장으로 이어 붙이되, 추정이 필요한 부분은 그대로 둡니다.
+            - 이상한 단어/오탈자는 '발음상 근접한 단어'로만 아주 보수적으로 보정합니다.
+            - 말끝의 반복, 불필요한 군더더기(어, 음, 그, ...)는 제거해도 됩니다.
+            - 출력은 speaker별로 문장 단위로 끊어서 반환하고, timestamp는 해당 문장을 구성한 첫 조각의 timestamp를 사용하세요.
+            - '.' 같은 구두점/한 글자 잡음은 제거하세요.
+
+            입력(JSON):
+            {json.dumps(stt_only, ensure_ascii=False)}
+
+            출력(JSON만):
+            {{
+              "refined_stt": [
+                {{"type":"stt","speaker":"user|cnsler","text":"문장","timestamp":"ms-string"}}
+              ]
+            }}
+            """
+            refine = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": refine_prompt}],
+                response_format={"type": "json_object"},
+            )
+            refined_obj = json.loads(refine.choices[0].message.content or "{}")
+            refined_list = refined_obj.get("refined_stt", [])
+            if isinstance(refined_list, list) and refined_list:
+                # 유효한 항목만 남기기
+                normalized = []
+                for it in refined_list:
+                    if not isinstance(it, dict):
+                        continue
+                    t = (it.get("text") or "").strip()
+                    if not t or re.fullmatch(r"[.\-_,\s]+", t) or len(t) <= 1:
+                        continue
+                    sp = (it.get("speaker") or "").strip().lower()
+                    sp = "cnsler" if sp in ("counselor", "cnsler", "system") else "user"
+                    ts = str(it.get("timestamp") or "")
+                    if not ts.isdigit():
+                        ts = str(int(time.time() * 1000))
+                    normalized.append({"type": "stt", "speaker": sp, "text": t, "timestamp": ts})
+                if normalized:
+                    user_stt_list = [x for x in normalized if x["speaker"] == "user"]
+                    cnsler_stt_list = [x for x in normalized if x["speaker"] == "cnsler"]
+    except Exception as e:
+        logger.exception(f"STT 정제 에러: {e}")
 
     all_combined = chat_messages + user_stt_list + cnsler_stt_list
     all_combined.sort(key=lambda x: int(x.get('timestamp', 0)))
