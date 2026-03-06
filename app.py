@@ -91,6 +91,7 @@ async def summarize_audio(
     audio_cnsler: UploadFile = File(None),
     msg_data: str | None = Form(None),
 ):
+    print("POST /api/summarize: request received")
     client = get_openai_client()
     chat_messages = []
     
@@ -107,9 +108,12 @@ async def summarize_audio(
         if not upload or not upload.filename:
             return []
         try:
+            upload.file.seek(0)
             content = upload.file.read()
             if not content:
+                print(f"[{speaker}] 음성 파일 크기 0바이트, STT 생략")
                 return []
+            print(f"[{speaker}] STT 처리 중, 크기: {len(content)} bytes")
             
             bio = io.BytesIO(content)
             bio.name = "audio.webm" 
