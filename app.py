@@ -2,6 +2,8 @@ import os
 import io
 import json
 import time
+import logging
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -91,7 +93,8 @@ async def summarize_audio(
     audio_cnsler: UploadFile = File(None),
     msg_data: str | None = Form(None),
 ):
-    print("POST /api/summarize: request received")
+    logger = logging.getLogger("uvicorn.error")
+    logger.info("POST /api/summarize: request received")
     client = get_openai_client()
     chat_messages = []
     
@@ -99,7 +102,7 @@ async def summarize_audio(
         try:
             chat_messages = json.loads(msg_data)
         except Exception as e:
-            print(f"채팅 파싱 에러: {e}")
+            logger.warning(f"채팅 파싱 에러: {e}")
             chat_messages = []
 
     base_time = int(chat_messages[0].get('timestamp', time.time() * 1000)) if chat_messages else int(time.time() * 1000)
@@ -111,9 +114,9 @@ async def summarize_audio(
             upload.file.seek(0)
             content = upload.file.read()
             if not content:
-                print(f"[{speaker}] 음성 파일 크기 0바이트, STT 생략")
+                logger.info(f"[{speaker}] 음성 파일 크기 0바이트, STT 생략")
                 return []
-            print(f"[{speaker}] STT 처리 중, 크기: {len(content)} bytes")
+            logger.info(f"[{speaker}] STT 처리 중, 크기: {len(content)} bytes, filename={upload.filename}")
             
             bio = io.BytesIO(content)
             # Whisper는 파일 확장자에 민감할 수 있어 클라이언트 업로드 파일명을 최대한 유지
@@ -131,15 +134,19 @@ async def summarize_audio(
             results = []
             for seg in segments:
                 msg_time = base_time + int(seg.get('start', 0) * 1000)
+                text = (seg.get('text', '') or '').strip()
+                # 무의미한 '.' 같은 구두점/공백만 필터
+                if not text or re.fullmatch(r"[.\-_,\s]+", text) or len(text) <= 1:
+                    continue
                 results.append({
                     "type": "stt",
                     "speaker": speaker,
-                    "text": seg.get('text', '').strip(),
+                    "text": text,
                     "timestamp": str(msg_time)
                 })
             return results
         except Exception as e:
-            print(f"[{speaker}] STT 에러: {e}")
+            logger.exception(f"[{speaker}] STT 에러: {e}")
             return []
 
     user_stt_list = _get_stt_with_time(audio_user, "user")
@@ -177,7 +184,7 @@ async def summarize_audio(
         final_summary = res_json.get("summary", "요약 생성 실패")
         final_summary_line = res_json.get("summary_line", "").strip() or None
     except Exception as e:
-        print(f"GPT 처리 에러: {e}")
+        logger.exception(f"GPT 처리 에러: {e}")
         final_messages = all_combined
         final_summary = "정리 중 오류가 발생했습니다."
         final_summary_line = None
