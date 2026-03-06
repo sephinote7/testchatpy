@@ -116,7 +116,8 @@ async def summarize_audio(
             print(f"[{speaker}] STT 처리 중, 크기: {len(content)} bytes")
             
             bio = io.BytesIO(content)
-            bio.name = "audio.webm" 
+            # Whisper는 파일 확장자에 민감할 수 있어 클라이언트 업로드 파일명을 최대한 유지
+            bio.name = upload.filename or "audio.webm"
             
             resp = client.audio.transcriptions.create(
                 model="whisper-1",
