@@ -242,7 +242,8 @@ def member_exists_by_email(email: str) -> bool:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM member WHERE email = %s LIMIT 1",
+                # public.member의 PK는 member_id(varchar)=이메일. email 컬럼 없음.
+                "SELECT 1 FROM member WHERE member_id = %s LIMIT 1",
                 (email.strip(),),
             )
             return cur.fetchone() is not None

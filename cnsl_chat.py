@@ -3,7 +3,7 @@
 - GET  /api/cnsl/{cnsl_id}/chat : 채팅 메시지 목록 조회
 - POST /api/cnsl/{cnsl_id}/chat : 메시지 전송 및 저장
 """
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 # DB 함수들 임포트
@@ -21,13 +21,16 @@ from chat_msg_db import (
 # [수정] tags 추가 및 prefix 확인
 router = APIRouter(prefix="/api/cnsl", tags=["cnsl-chat"])
 
-def get_member_email(x_user_email: str | None = Header(None, alias="X-User-Email")) -> str:
-    email = (x_user_email or "").strip()
-    if not email:
-        raise HTTPException(status_code=401, detail="X-User-Email 헤더가 필요합니다.")
-    if not member_exists_by_email(email):
+def get_member_id(
+    member_id: str | None = Query(None, alias="member_id"),
+    memberId: str | None = Query(None, alias="memberId"),
+) -> str:
+    mid = (member_id or memberId or "").strip()
+    if not mid:
+        raise HTTPException(status_code=401, detail="member_id가 필요합니다.")
+    if not member_exists_by_email(mid):
         raise HTTPException(status_code=401, detail="존재하지 않는 사용자입니다.")
-    return email
+    return mid
 
 def _validate_cnsl_access(cnsl_id: int, current_email: str) -> None:
     if not cnsl_reg_exists(cnsl_id):
@@ -76,7 +79,7 @@ class PostChatBody(BaseModel):
 # --- API Endpoints ---
 
 @router.get("/{cnsl_id}/chat")
-async def get_chat_messages(cnsl_id: int, member_id: str = Depends(get_member_email)):
+async def get_chat_messages(cnsl_id: int, member_id: str = Depends(get_member_id)):
     # 1. 먼저 상담 정보를 가져옵니다.
     reg = get_cnsl_reg(cnsl_id)
     if not reg:
@@ -91,7 +94,7 @@ async def get_chat_messages(cnsl_id: int, member_id: str = Depends(get_member_em
     return _flatten_to_frontend_format(row, reg.get("member_id"), reg.get("cnsler_id"))
 
 @router.post("/{cnsl_id}/chat")
-async def post_chat_message(cnsl_id: int, body: PostChatBody, member_id: str = Depends(get_member_email)):
+async def post_chat_message(cnsl_id: int, body: PostChatBody, member_id: str = Depends(get_member_id)):
     _validate_cnsl_access(cnsl_id, member_id)
     role = (body.role or "").strip().lower()
     content = (body.content or body.summary or "").strip()
@@ -123,7 +126,7 @@ class PatchStatBody(BaseModel):
     cnslStat: str
 
 @router.patch("/{cnsl_id}/stat")
-async def patch_cnsl_stat(cnsl_id: int, body: PatchStatBody, member_id: str = Depends(get_member_email)):
+async def patch_cnsl_stat(cnsl_id: int, body: PatchStatBody, member_id: str = Depends(get_member_id)):
     _validate_cnsl_access(cnsl_id, member_id)
     stat = (body.cnslStat or "").strip().upper()
     if stat not in ("C", "D"):
@@ -138,7 +141,7 @@ class PostSummaryFullBody(BaseModel):
     msg_data: list
 
 @router.post("/{cnsl_id}/chat/summary-full")
-async def post_summary_full(cnsl_id: int, body: PostSummaryFullBody, member_id: str = Depends(get_member_email)):
+async def post_summary_full(cnsl_id: int, body: PostSummaryFullBody, member_id: str = Depends(get_member_id)):
     _validate_cnsl_access(cnsl_id, member_id)
     reg = get_cnsl_reg(cnsl_id)
     row = upsert_chat_msg_summary(

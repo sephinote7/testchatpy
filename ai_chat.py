@@ -9,7 +9,7 @@ AI 상담 API (회원 전용). cnsl_tp=3(AI상담) 전용.
 import json
 import os
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from ai_db import (
@@ -30,14 +30,20 @@ router = APIRouter(prefix="/api/ai", tags=["ai-chat"])
 history_router = APIRouter(prefix="/api/ai", tags=["ai-chat"])
 
 
-def get_member_email(x_user_email: str | None = Header(None, alias="X-User-Email")) -> str:
-    """회원 전용: X-User-Email 필수. member 테이블에 존재하는 email만 허용."""
-    email = (x_user_email or "").strip()
-    if not email:
-        raise HTTPException(status_code=401, detail="존재하지 않는 User")
-    if not member_exists_by_email(email):
-        raise HTTPException(status_code=401, detail="존재하지 않는 User")
-    return email
+def get_member_id(
+    member_id: str | None = Query(None, alias="member_id"),
+    memberId: str | None = Query(None, alias="memberId"),
+) -> str:
+    """
+    커스텀 헤더 없이 query 파라미터로 member_id를 받는다.
+    - member_id: public.member PK(varchar)=이메일
+    """
+    mid = (member_id or memberId or "").strip()
+    if not mid:
+        raise HTTPException(status_code=401, detail="member_id가 필요합니다.")
+    if not member_exists_by_email(mid):
+        raise HTTPException(status_code=401, detail="존재하지 않는 사용자입니다.")
+    return mid
 
 
 def _validate_cnsl_access(cnsl_id: int, member_id: str) -> None:
@@ -70,7 +76,7 @@ def _row_to_visual_format(row: dict | None) -> dict | None:
 
 
 @history_router.get("/chat/history")
-async def get_chat_history(member_id: str = Depends(get_member_email)):
+async def get_chat_history(member_id: str = Depends(get_member_id)):
     """AI 상담(cnsl_tp=3) 목록 조회. cnsl_stat, cnsl_dt, cnsl_start_time, cnsl_end_time, cnsl_title, cnsl_content 반환."""
     if not DATABASE_URL:
         raise HTTPException(status_code=503, detail="서비스를 일시적으로 사용할 수 없습니다.")
@@ -85,7 +91,7 @@ async def get_chat_history(member_id: str = Depends(get_member_email)):
 
 
 @router.get("/chat/{cnsl_id}")
-async def get_chat(cnsl_id: int, member_id: str = Depends(get_member_email)):
+async def get_chat(cnsl_id: int, member_id: str = Depends(get_member_id)):
     """ai_msg 조회. VisualChat 형식으로 목록 1건 반환."""
     _validate_cnsl_access(cnsl_id, member_id)
     row = get_bot_msg(cnsl_id, member_id)
@@ -101,7 +107,7 @@ class PostChatBody(BaseModel):
 
 
 @router.post("/chat/{cnsl_id}")
-async def post_chat(cnsl_id: int, body: PostChatBody, member_id: str = Depends(get_member_email)):
+async def post_chat(cnsl_id: int, body: PostChatBody, member_id: str = Depends(get_member_id)):
     """사용자 메시지 저장 → OpenAI 응답 생성·저장 → VisualChat 형식 1건 반환."""
     _validate_cnsl_access(cnsl_id, member_id)
     content = (body.content or body.text or "").strip()

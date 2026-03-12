@@ -10,7 +10,7 @@
 ### 요약 (기존)
 - `POST /api/summarize` — 음성/영상 파일 업로드 → OpenAI Whisper STT 후 gpt-4o-mini 요약 (webm, mp3, wav 등)
 
-### AI 상담 (회원 전용, 헤더 `X-User-Email` 필수)
+### AI 상담 (회원 전용)
 
 | Method | 경로 | 설명 |
 |--------|------|------|
@@ -65,7 +65,7 @@ https://testchatpy.onrender.com
 2. **AI 상담 API 요청 시 필수 헤더**
    | 헤더 | 값 | 설명 |
    |------|-----|------|
-   | X-User-Email | 회원 이메일 | 회원 식별 (예: `user@example.com`) |
+   | Query `member_id` | 회원 이메일(member_id) | 회원 식별 (예: `user@example.com`) |
 
 3. **요청 예시 (AI 상담)**
    - **GET** `{{base_url}}/api/ai/chat/history` — AI 상담 목록
