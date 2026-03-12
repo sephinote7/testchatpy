@@ -130,7 +130,7 @@ async def post_chat(cnsl_id: int, body: PostChatBody, member_id: str = Depends(g
 
 
 @router.post("/chat/{cnsl_id}/summary")
-async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email)):
+async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_id)):
     """대화 기준 요약 생성 후 summary 저장 (300자 이내)."""
     _validate_cnsl_access(cnsl_id, member_id)
     row = get_bot_msg(cnsl_id, member_id)
@@ -201,7 +201,7 @@ async def post_summary(cnsl_id: int, member_id: str = Depends(get_member_email))
 
 
 @router.delete("/chat/{cnsl_id}")
-async def delete_chat(cnsl_id: int, member_id: str = Depends(get_member_email)):
+async def delete_chat(cnsl_id: int, member_id: str = Depends(get_member_id)):
     """AI 상담 기록 삭제 처리(소프트 삭제: cnsl_reg.del_yn='Y')."""
     _validate_cnsl_access(cnsl_id, member_id)
     ok = delete_ai_consult(cnsl_id, member_id)
