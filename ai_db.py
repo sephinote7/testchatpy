@@ -33,7 +33,7 @@ def get_bot_msg(cnsl_id: int, member_id: str) -> Optional[dict]:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                """SELECT ai_id, cnsl_id, member_id, msg_data, summary, created_at, updated_at
+                """SELECT cnsl_id, member_id, msg_data, summary, created_at
                    FROM ai_msg WHERE cnsl_id = %s AND member_id = %s LIMIT 1""",
                 (cnsl_id, member_id),
             )
@@ -50,13 +50,13 @@ def upsert_bot_msg(cnsl_id: int, member_id: str, msg_data: dict, summary: Option
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                """INSERT INTO ai_msg (cnsl_id, member_id, msg_data, summary, created_at, updated_at)
-                   VALUES (%s, %s, %s::jsonb, %s, %s::timestamp, %s::timestamp)
+                """INSERT INTO ai_msg (cnsl_id, member_id, msg_data, summary, created_at)
+                   VALUES (%s, %s, %s::jsonb, %s, %s::timestamp)
                    ON CONFLICT (cnsl_id, member_id)
                    DO UPDATE SET msg_data = EXCLUDED.msg_data,
-                       summary = COALESCE(EXCLUDED.summary, ai_msg.summary), updated_at = EXCLUDED.updated_at
-                   RETURNING ai_id, cnsl_id, member_id, msg_data, summary, created_at, updated_at""",
-                (cnsl_id, member_id, msg_data_json, summary or None, now, now),
+                       summary = COALESCE(EXCLUDED.summary, ai_msg.summary)
+                   RETURNING cnsl_id, member_id, msg_data, summary, created_at""",
+                (cnsl_id, member_id, msg_data_json, summary or None, now),
             )
             row = cur.fetchone()
     if not row:
@@ -144,9 +144,9 @@ def update_summary(cnsl_id: int, member_id: str, summary: str) -> Optional[dict]
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                """UPDATE ai_msg SET summary = %s, updated_at = CURRENT_TIMESTAMP
+                """UPDATE ai_msg SET summary = %s
                    WHERE cnsl_id = %s AND member_id = %s
-                   RETURNING ai_id, cnsl_id, member_id, msg_data, summary, created_at, updated_at""",
+                   RETURNING cnsl_id, member_id, msg_data, summary, created_at""",
                 (summary, cnsl_id, member_id),
             )
             row = cur.fetchone()
