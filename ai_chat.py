@@ -37,12 +37,12 @@ def get_member_id(
     """
     커스텀 헤더 없이 query 파라미터로 member_id를 받는다.
     - member_id: public.member PK(varchar)=이메일
+    - 실제 회원 여부 검증은 Spring(JWT)에서 이미 수행한다고 가정하고,
+      여기서는 단순히 값 존재만 확인한다.
     """
     mid = (member_id or memberId or "").strip()
     if not mid:
         raise HTTPException(status_code=401, detail="member_id가 필요합니다.")
-    if not member_exists_by_email(mid):
-        raise HTTPException(status_code=401, detail="존재하지 않는 사용자입니다.")
     return mid
 
 
