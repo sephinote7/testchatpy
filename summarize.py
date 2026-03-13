@@ -25,7 +25,8 @@ class SummarizeResponse(BaseModel):
     transcript: str | None = None
     summary: str
     summary_line: str | None = None
-    msg_data: list | None = None
+    # 채팅 + STT가 섞인 최종 대화 로그
+    msg_data: list
 
 
 class _SttRefineResponse(BaseModel):
@@ -163,21 +164,35 @@ async def summarize_audio(
     except Exception as e:
         logger.exception(f"STT 정제 에러: {e}")
 
+    # 최종 대화 로그: 원본 채팅 + STT를 모두 포함, timestamp 기준 정렬
     all_combined = chat_messages + user_stt_list + cnsler_stt_list
+    all_combined = [
+        x for x in all_combined
+        if isinstance(x, dict) and x.get("text")
+    ]
+    for msg in all_combined:
+        try:
+            msg["timestamp"] = str(int(msg.get("timestamp") or 0))
+        except Exception:
+            msg["timestamp"] = str(int(time.time() * 1000))
     all_combined.sort(key=lambda x: int(x.get("timestamp", 0)))
 
+    # 요약/요약문은 LLM에게 맡기고, msg_data 구조는 그대로 유지한다.
     prompt = f"""
 당신은 상담 데이터를 정리하는 전문가입니다.
-제공된 [데이터]는 채팅 기록과 음성 인식 결과가 섞여 있습니다.
-1. reordered_msg: 시간순 대화록 배열.
-2. summary: 서술형 요약(300자 이내).
-3. summary_line: 핵심 한 줄 요약.
+제공된 [데이터]는 채팅 기록과 음성 인식(STT) 결과가 섞여 있습니다.
+
+1. "summary": 전체 상담 내용을 250자 이내의 자연스러운 한국어 서술형 문단으로 요약합니다.
+   - 핵심 내용과 흐름이 드러나도록 2~4문장 정도로 작성합니다.
+   - "안녕하세요" 같은 인사 한 줄처럼 지나치게 짧은 문장은 피하고, 충분한 정보를 담으세요.
+2. "summary_line": 전체 내용에서 가장 중요한 핵심을 한 줄(한 문장)로 표현합니다.
+   - 1문장으로만 작성하고, 80자 이내로 간결하게 정리합니다.
 
 [데이터]
 {json.dumps(all_combined, ensure_ascii=False)}
 
 응답 형식(JSON만 출력):
-{{ "reordered_msg": [...], "summary": "...", "summary_line": "..." }}
+{{ "summary": "...", "summary_line": "..." }}
 """
 
     try:
@@ -186,24 +201,38 @@ async def summarize_audio(
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
         )
-        res_json = json.loads(completion.choices[0].message.content)
-        final_messages = res_json.get("reordered_msg", all_combined)
-        final_summary = res_json.get("summary", "요약 생성 실패")
-        final_summary_line = (res_json.get("summary_line", "") or "").strip() or None
+        res_json = json.loads(completion.choices[0].message.content or "{}")
+        final_summary = (res_json.get("summary") or "").strip()
+        final_summary_line = (res_json.get("summary_line") or "").strip() or None
     except Exception as e:
         logger.exception(f"GPT 처리 에러: {e}")
-        final_messages = all_combined
-        final_summary = "정리 중 오류가 발생했습니다."
+        final_summary = ""
         final_summary_line = None
 
-    summary_ok = (final_summary or "").strip()
-    if len(summary_ok) > 300:
-        summary_ok = summary_ok[:297].rstrip() + "…"
+    # summary 최소/최대 길이 방어: 너무 짧으면 기본 텍스트에서 재구성, 너무 길면 250자로 자름
+    def build_fallback_summary() -> str:
+        texts = [str(m.get("text") or "") for m in all_combined if m.get("text")]
+        if not texts:
+            return "화상 상담 내용 요약입니다."
+        joined = " ".join(texts)
+        if len(joined) <= 250:
+            return joined
+        sliced = joined[:251]
+        last_space = sliced.rfind(" ")
+        return (sliced[:last_space] if last_space > 0 else sliced[:250]).strip()
+
+    summary_ok = final_summary or ""
+    if len(summary_ok) < 10:
+        summary_ok = build_fallback_summary()
+    if len(summary_ok) > 250:
+        sliced = summary_ok[:251]
+        last_space = sliced.rfind(" ")
+        summary_ok = (sliced[:last_space] if last_space > 0 else sliced[:250]).strip()
 
     return SummarizeResponse(
         transcript="",
         summary=summary_ok or "요약 없음",
         summary_line=final_summary_line,
-        msg_data=final_messages,
+        msg_data=all_combined,
     )
 
