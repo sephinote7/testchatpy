@@ -123,8 +123,17 @@ def append_chat_content(
                 updates = ["msg_data = %s::jsonb"]
                 params = [json.dumps(msg_data, ensure_ascii=False)]
                 if summary_val:
+                    # summary_val이 이미 JSON 형태라면 그대로 사용, 아니라면 표준 JSON 포맷으로 래핑
+                    sv = (summary_val or "").strip()
+                    if sv.startswith("{") and "\"summary\"" in sv:
+                        final_summary = sv
+                    else:
+                        final_summary = json.dumps(
+                            {"summary": sv, "summary_line": ""},
+                            ensure_ascii=False,
+                        )
                     updates.append("summary = %s")
-                    params.append(summary_val)
+                    params.append(final_summary)
                 if existing.get("role") in (None, "") and role_val:
                     updates.append("role = %s")
                     params.append(role_val)
@@ -146,6 +155,15 @@ def append_chat_content(
                 )
             if not existing:
                 msg_data = {"content": content}
+                # INSERT 시에도 summary_val을 표준 JSON 포맷으로 맞춘다.
+                sv = (summary_val or "").strip()
+                if sv.startswith("{") and "\"summary\"" in sv:
+                    final_summary = sv
+                else:
+                    final_summary = json.dumps(
+                        {"summary": sv, "summary_line": ""},
+                        ensure_ascii=False,
+                    )
                 cur.execute(
                     """INSERT INTO chat_msg (cnsl_id, member_id, cnsler_id, role, msg_data, summary)
                        VALUES (%s, %s, %s, %s, %s::jsonb, %s)
@@ -156,7 +174,7 @@ def append_chat_content(
                         cnsler_email or "",
                         role_val,
                         json.dumps(msg_data, ensure_ascii=False),
-                        summary_val,
+                        final_summary,
                     ),
                 )
                 row = cur.fetchone()
