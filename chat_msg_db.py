@@ -202,17 +202,56 @@ def upsert_chat_msg_summary(
     """
     chat_msg에 summary + msg_data.content 전체 업데이트(추가 아님).
     cnsl_id당 여러 행이 있으면 created_at 오름차순 첫 행만 갱신해 중복 방지.
-    summary 컬럼에 JSON 저장: {"summary": "300자 요약", "summary_line": "한 줄 문장"}
+
+    summary 컬럼에는 JSON 문자열을 저장하며, 구조는 다음과 같다.
+      {
+        "summary": "<전체 상담 내용을 250자 이내로 요약한 문장>",
+        "summary_line": "<전체 내용에서 핵심이 되는 한 줄>"
+      }
+
+    - summary: 외부에서 생성해 넘겨준 요약을 기반으로 하되, 최대 250자로 방어적으로 잘라 저장한다.
+    - summary_line: 외부에서 생성해 넘겨준 한 줄 요약을 trim 해서 그대로 저장한다.
+
+    실제 요약/핵심 문장 생성 책임은 호출 측(STT/LLM 로직)에 있으며,
+    이 함수는 길이·형식 제약을 보정하는 역할만 수행한다.
     """
     if not DATABASE_URL or cnsl_id <= 0:
         return None
     content_list = msg_data_content if isinstance(msg_data_content, list) else []
+
+    # STT 포함 전체 대화 내역을 timestamp 기준으로 정렬
+    normalized = []
+    for item in content_list:
+      if not isinstance(item, dict):
+        continue
+      ts_raw = item.get("timestamp")
+      try:
+          ts = int(ts_raw)
+      except (TypeError, ValueError):
+          ts = 0
+      normalized.append({**item, "timestamp": ts})
+    normalized.sort(key=lambda x: x.get("timestamp", 0))
+    content_list = normalized
+
     last_speaker = (content_list[-1].get("speaker") or "").lower() if content_list else ""
     if last_speaker == "user":
         update_cnsl_todo_yn(cnsl_id, "N")
     msg_data = {"content": content_list}
     msg_data_json = json.dumps(msg_data, ensure_ascii=False)
-    summary_payload = {"summary": (summary or "")[:300], "summary_line": (summary_line or "").strip()}
+
+    # summary: 250자 이내로 방어적 제한 (요약 생성 자체는 호출 측 책임)
+    MAX_SUMMARY_LEN = 250
+    clean_summary = (summary or "").strip()
+    if len(clean_summary) > MAX_SUMMARY_LEN:
+        clean_summary = clean_summary[:MAX_SUMMARY_LEN]
+
+    # summary_line: 한 줄 핵심 문장, 양쪽 공백 제거
+    clean_summary_line = (summary_line or "").strip()
+
+    summary_payload = {
+        "summary": clean_summary,
+        "summary_line": clean_summary_line,
+    }
     summary_json = json.dumps(summary_payload, ensure_ascii=False)
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
