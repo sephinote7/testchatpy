@@ -33,6 +33,10 @@ class _SttRefineResponse(BaseModel):
     refined_stt: list[dict[str, Any]]
 
 
+MAX_AUDIO_BYTES = 5_000_000  # ~5MB 이상이면 STT 생략(너무 긴 통화 방어)
+MAX_LLM_MSG_ITEMS = 200      # 요약 입력으로 넘길 최대 메시지 수(최근 N개만 사용)
+
+
 @router.post("/api/summarize", response_model=SummarizeResponse)
 async def summarize_audio(
     audio_user: UploadFile = File(None),
@@ -65,6 +69,12 @@ async def summarize_audio(
             content = upload.file.read()
             if not content:
                 logger.info(f"[{speaker}] 음성 파일 크기 0바이트, STT 생략")
+                return []
+            if len(content) > MAX_AUDIO_BYTES:
+                logger.info(
+                    f"[{speaker}] 음성 파일이 {len(content)} bytes로 너무 커서 STT를 생략합니다 "
+                    f"(MAX_AUDIO_BYTES={MAX_AUDIO_BYTES})"
+                )
                 return []
             logger.info(
                 f"[{speaker}] STT 처리 중, 크기: {len(content)} bytes, filename={upload.filename}"
@@ -176,6 +186,10 @@ async def summarize_audio(
         except Exception:
             msg["timestamp"] = str(int(time.time() * 1000))
     all_combined.sort(key=lambda x: int(x.get("timestamp", 0)))
+
+    # LLM 입력 크기 방어: 너무 많은 메시지가 있으면 최근 N개만 사용
+    if len(all_combined) > MAX_LLM_MSG_ITEMS:
+        all_combined = all_combined[-MAX_LLM_MSG_ITEMS:]
 
     # 요약/요약문은 LLM에게 맡기고, msg_data 구조는 그대로 유지한다.
     prompt = f"""
