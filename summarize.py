@@ -96,11 +96,12 @@ async def summarize_audio(
             for seg in segments:
                 msg_time = base_time + int(seg.get("start", 0) * 1000)
                 text = (seg.get("text", "") or "").strip()
+                # 한 글자라도 실제 발화가 있으면 STT로 남기고,
+                # 순수 구두점/공백, "silence" 만 제거한다.
                 if (
                     not text
                     or text.lower() == "silence"
                     or re.fullmatch(r"[.\-_,\s]+", text)
-                    or len(text) <= 1
                 ):
                     continue
                 results.append(
@@ -157,7 +158,6 @@ async def summarize_audio(
                         not t
                         or t.lower() == "silence"
                         or re.fullmatch(r"[.\-_,\s]+", t)
-                        or len(t) <= 1
                     ):
                         continue
                     sp = (it.get("speaker") or "").strip().lower()
