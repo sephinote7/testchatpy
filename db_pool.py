@@ -13,7 +13,9 @@ from psycopg2 import pool
 from psycopg2.pool import PoolError
 
 load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Render/환경변수에 줄바꿈이 들어가면 database "postgres\n" does not exist 오류 발생 → strip 처리
+_raw = os.getenv("DATABASE_URL")
+DATABASE_URL = (_raw.strip() if _raw else None) or None
 
 # 연결 풀 설정: 무료 플랜 환경에 맞춰 **최소한의 커넥션만** 사용
 _connection_pool = None
