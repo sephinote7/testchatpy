@@ -1,6 +1,7 @@
 """
 ML/통계 라우터: 주간 키워드, 추천, 월간 인기.
 app.py에서 include_router로 포함하고, lifespan에서 load_ml_data()를 호출해야 합니다.
+mlFunctionVersion은 load_ml_data() 내부에서만 import (konlpy/Okt가 JVM 필요 → Render 등에서 상단 import 시 기동 실패 방지).
 """
 import logging
 from io import BytesIO
@@ -12,16 +13,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List
 from wordcloud import WordCloud
-
-from mlFunctionVersion import (
-    get_db_connection,
-    load_table_as_df,
-    compute_user_activity,
-    prepare_bbs_tfidf,
-    compute_user_vector,
-    generate_recommendations,
-    generate_monthly_top,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +38,20 @@ weekly_wordcloud_image = None
 
 
 def load_ml_data():
-    """앱 시작 시 한 번 호출. DB에서 bbs 등 로드 후 TF-IDF·주간 키워드·워드클라우드 생성."""
+    """앱 시작 시 한 번 호출. DB에서 bbs 등 로드 후 TF-IDF·주간 키워드·워드클라우드 생성. JVM(konlpy) 없으면 스킵."""
     global like_row, bbs_row, cmt_like_row, comment_row
     global bbs, tfidf_vectorizer, tfidf_mat
     global top_keywords, weekly_wordcloud_image
+
+    try:
+        from mlFunctionVersion import (
+            get_db_connection,
+            load_table_as_df,
+            prepare_bbs_tfidf,
+        )
+    except Exception as e:
+        logger.warning("ML 데이터 로딩 스킵 (예: JVM/konlpy 미설치): %s", e)
+        return
 
     try:
         conn = get_db_connection()
@@ -131,6 +132,11 @@ class RecommendationResponse(BaseModel):
 async def recommend_posts(request: RecommendationRequest):
     if bbs is None:
         raise HTTPException(status_code=503, detail="데이터가 아직 로딩되지 않았습니다.")
+    from mlFunctionVersion import (
+        compute_user_activity,
+        compute_user_vector,
+        generate_recommendations,
+    )
 
     final_result = compute_user_activity(
         request.user_id, like_row, bbs_row, cmt_like_row, comment_row
@@ -173,6 +179,8 @@ async def recommend_posts(request: RecommendationRequest):
 async def monthly_top():
     if bbs is None:
         return {"count": 0, "posts": []}
+    from mlFunctionVersion import generate_monthly_top
+
     monthly = generate_monthly_top(bbs_row, bbs, like_row)
     if "title_x" in monthly.columns:
         monthly["title"] = monthly["title_x"]
