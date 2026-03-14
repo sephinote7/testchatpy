@@ -4,10 +4,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from summarize import router as summarize_router
+from ml_routes import router as ml_router, load_ml_data
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 시작 시 로직이 필요하면 여기에 작성
+    load_ml_data()
     yield
 
 app = FastAPI(title="화상채팅 음성 요약 API", lifespan=lifespan)
@@ -29,6 +30,8 @@ async def root():
 # CORS 설정: credentials 사용 시 allow_origins는 "*" 불가 → 구체적 origin 목록 필요
 _required_origins = [
     "https://testchat-alpha.vercel.app",
+    "https://www.gmss.site",
+    "https://gmss.site",
     "http://localhost:5173",
     "http://localhost:3000",
     "http://127.0.0.1:5173",
@@ -62,6 +65,7 @@ app.include_router(ai_chat_router)
 app.include_router(cnsl_chat_router)
 app.include_router(site_chat_router)
 app.include_router(summarize_router)
+app.include_router(ml_router)
 
 if __name__ == "__main__":
     import uvicorn

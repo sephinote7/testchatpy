@@ -274,10 +274,8 @@ async def monthly_top():
 # =========================
 @app.get("/weekly-keywords")
 async def weekly_keywords():
-
     if top_keywords is None:
-        raise HTTPException(status_code=503, detail="데이터가 아직 로딩되지 않았습니다.")
-
+        return {"count": 0, "keywords": []}
     return {
         "count": len(top_keywords),
         "keywords": top_keywords
@@ -303,7 +301,11 @@ async def weekly_wordcloud():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # 프론트 주소
+    allow_origins=[
+        "http://localhost:5173",
+        "https://www.gmss.site",
+        "https://gmss.site",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

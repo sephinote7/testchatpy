@@ -7,6 +7,22 @@
 
 ## API
 
+### ML/통계 API (app.py에 라우터로 포함)
+
+**app.py** 메인 앱에 `ml_routes` 라우터가 포함되어 있어, **같은 서비스(uvicorn app:app)** 하나로 채팅·요약·ML API를 모두 제공합니다.
+
+| Method | 경로 | 설명 |
+|--------|------|------|
+| GET | /weekly-keywords | 최근 7일 게시글 TF-IDF 기반 이번 주 키워드 (응답: `{ count, keywords: [{ keyword, score }] }`) |
+| GET | /weekly-wordcloud | 위 키워드 기반 워드클라우드 이미지 (PNG) |
+| POST | /recommend | body `{ "user_id": "email" }` → 해당 유저 추천 게시글 |
+| GET | /monthly-top | 월간 인기글 |
+
+**의존성**: ML 데이터 로딩 시 PostgreSQL에서 `bbs`, `bbs_like`, `bbs_comment`, `cmt_like` 테이블 필요. `.env`에 `user`, `password`, `host`, `port`, `dbname` 설정. 로딩 실패 시 앱은 그대로 기동하며 ML 경로만 503/빈 응답을 반환합니다.  
+**프론트 연동**: testchat 배포 시 **VITE_FASTAPI_URL**을 이 서비스(예: Render 배포 URL)로 설정하면 게시판 인기/추천/주간 키워드 요청이 이쪽으로 전달됩니다. 미설정 시 요청은 Spring(api.gmss.site)으로 가며 해당 경로가 없으면 프론트에서 빈 데이터로 처리됩니다.
+
+**별도 실행(선택)**: ML만 단독 서비스로 돌리려면 `python mlfcForFastAPI.py` (포트 8000)로 기동할 수 있으며, 동일 라우트를 제공합니다.
+
 ### 요약 (기존)
 - `POST /api/summarize` — 음성/영상 파일 업로드 → OpenAI Whisper STT 후 gpt-4o-mini 요약 (webm, mp3, wav 등)
 

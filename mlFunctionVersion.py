@@ -1,3 +1,4 @@
+# 라우터 아님. app.py의 ml_routes.py 및 mlfcForFastAPI.py에서 import하여 사용.
 from ast import literal_eval
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
