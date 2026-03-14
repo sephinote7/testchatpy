@@ -1,13 +1,25 @@
 # Render Web Service 배포 설정
 # https://render.com/docs/blueprint-spec
+# Java(konlpy/Okt) 사용 시 runtime: docker + Dockerfile 사용. 미사용 시 대시보드에서 runtime을 python으로 바꾸고 buildCommand/startCommand 복원 가능.
 services:
   - type: web
     name: testchatpy
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     envVars:
       - key: OPENAI_API_KEY
         sync: false
       - key: DATABASE_URL
+        sync: false
+      # ML 라우트용 (선택). Dockerfile에 JVM 포함 시 아래 변수만 맞추면 /weekly-keywords 등 동작
+      - key: user
+        sync: false
+      - key: password
+        sync: false
+      - key: host
+        sync: false
+      - key: port
+        sync: false
+      - key: dbname
         sync: false
