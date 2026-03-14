@@ -8,6 +8,7 @@ import json
 import time
 from typing import Optional
 
+import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from db_pool import DATABASE_URL, get_conn
@@ -49,16 +50,45 @@ def upsert_bot_msg(cnsl_id: int, member_id: str, msg_data: dict, summary: Option
     msg_data_json = json.dumps({"content": content_list}, ensure_ascii=False)
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """INSERT INTO ai_msg (cnsl_id, member_id, msg_data, summary, created_at)
-                   VALUES (%s, %s, %s::jsonb, %s, %s::timestamp)
-                   ON CONFLICT (cnsl_id, member_id)
-                   DO UPDATE SET msg_data = EXCLUDED.msg_data,
-                       summary = COALESCE(EXCLUDED.summary, ai_msg.summary)
-                   RETURNING cnsl_id, member_id, msg_data, summary, created_at""",
-                (cnsl_id, member_id, msg_data_json, summary or None, now),
-            )
-            row = cur.fetchone()
+            try:
+                cur.execute(
+                    """INSERT INTO ai_msg (cnsl_id, member_id, msg_data, summary, created_at)
+                       VALUES (%s, %s, %s::jsonb, %s, %s::timestamp)
+                       ON CONFLICT (cnsl_id, member_id)
+                       DO UPDATE SET msg_data = EXCLUDED.msg_data,
+                           summary = COALESCE(EXCLUDED.summary, ai_msg.summary)
+                       RETURNING cnsl_id, member_id, msg_data, summary, created_at""",
+                    (cnsl_id, member_id, msg_data_json, summary or None, now),
+                )
+                row = cur.fetchone()
+            except psycopg2.ProgrammingError as e:
+                # UNIQUE(cnsl_id, member_id) 제약이 없으면 ON CONFLICT 실패 → SELECT 후 INSERT/UPDATE
+                if "unique or exclusion constraint" in (str(e) or ""):
+                    cur.execute(
+                        """SELECT cnsl_id, member_id, msg_data, summary, created_at
+                           FROM ai_msg WHERE cnsl_id = %s AND member_id = %s LIMIT 1""",
+                        (cnsl_id, member_id),
+                    )
+                    existing = cur.fetchone()
+                    if existing:
+                        cur.execute(
+                            """UPDATE ai_msg SET msg_data = %s::jsonb,
+                                summary = COALESCE(%s, summary)
+                               WHERE cnsl_id = %s AND member_id = %s
+                               RETURNING cnsl_id, member_id, msg_data, summary, created_at""",
+                            (msg_data_json, summary, cnsl_id, member_id),
+                        )
+                        row = cur.fetchone()
+                    else:
+                        cur.execute(
+                            """INSERT INTO ai_msg (cnsl_id, member_id, msg_data, summary, created_at)
+                               VALUES (%s, %s, %s::jsonb, %s, %s::timestamp)
+                               RETURNING cnsl_id, member_id, msg_data, summary, created_at""",
+                            (cnsl_id, member_id, msg_data_json, summary or None, now),
+                        )
+                        row = cur.fetchone()
+                else:
+                    raise
     if not row:
         raise RuntimeError("upsert_bot_msg failed")
     return dict(row)
