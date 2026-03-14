@@ -10,8 +10,8 @@ pandas==2.3.3
 numpy==2.4.1
 scikit-learn==1.8.0
 
-# Database
-psycopg2==2.9.11
+# Database (psycopg2-binary: pg_config 없이 설치, Docker/CI 권장)
+psycopg2-binary==2.9.11
 python-dotenv==1.2.2
 
 # NLP & Visualization
