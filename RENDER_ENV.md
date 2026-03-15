@@ -43,7 +43,14 @@
 
 - Render 대시보드 → Service → Environment 에서 `OPENAI_API_KEY` 값이 비어 있지 않은지 확인.
 
-### 3. /recommend 503 "데이터가 아직 로딩되지 않았습니다"
+### 3. 워드클라우드 한글이 네모(□)로 나오는 경우
+
+- **원인**: 서버에 한글 폰트가 없어 WordCloud가 글자 대신 네모를 그림.
+- **조치**:
+  - **Docker로 배포한 경우**: Dockerfile에 `fonts-nanum` 패키지가 포함되어 있으면 `/usr/share/fonts/truetype/nanum/` 경로의 나눔폰트를 사용합니다. 재배포 후 반영됩니다.
+  - **Docker 미사용(Python 네이티브)**: 프로젝트에 `fonts/NanumGothic.ttf` (또는 `NanumBarunGothic.ttf`) 파일을 넣고 배포하면 해당 폰트를 사용합니다. [나눔폰트](https://hangeul.naver.com/font)에서 다운로드 가능.
+
+### 4. /recommend 503 "데이터가 아직 로딩되지 않았습니다"
 
 - **원인**: 앱 시작 시 `load_ml_data()` 가 실패해 ML 데이터(bbs 등)가 로드되지 않음.
 - **확인**:
@@ -51,7 +58,7 @@
   2. **테이블**: Supabase에 `bbs`, `bbs_like`, `bbs_comment`, `cmt_like` 등이 있어야 함.
   3. **JVM(konlpy)**: Docker 이미지에 Java가 있어야 주간 키워드/추천 TF-IDF가 동작함. 없으면 ML 로딩이 스킵되고 503 발생.
 
-### 4. Render에서 host 값
+### 5. Render에서 host 값
 
 - Supabase Pooler 사용 시 host 는 보통  
   `aws-1-ap-southeast-2.pooler.supabase.com`  

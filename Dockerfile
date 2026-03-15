@@ -1,9 +1,9 @@
 # Python + OpenJDK (konlpy/Okt용). Render 등에서 JVM 필요 시 이 Dockerfile 사용
 FROM python:3.12-slim-bookworm
 
-# OpenJDK 17 JRE (konlpy/Okt 의존성)
+# OpenJDK 17 JRE (konlpy/Okt 의존성) + 한글 워드클라우드용 폰트
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openjdk-17-jre-headless \
+    && apt-get install -y --no-install-recommends openjdk-17-jre-headless fonts-nanum \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
