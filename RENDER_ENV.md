@@ -66,3 +66,17 @@
 - [ ] `DATABASE_URL` 사용 시 문자열 안에 `@` 가 **한 번** 포함됨 (USER:PASSWORD**@**HOST)
 - [ ] Supabase 사용 시 **포트 6543**(Pooler) 사용
 - [ ] 수정 후 **재배포**(Manual Deploy 또는 재저장 후 자동 배포) 실행
+
+---
+
+## "등록된 인기글이 없습니다" 나올 때
+
+| 탭 | API | 원인 |
+|----|-----|------|
+| **실시간** | Spring `GET /api/bbs_popularPostRealtimeList?period=realtime` | DB에 **최근 1일** 게시글이 없음 (또는 공지 제외 후 없음). |
+| **주간** | Spring `GET /api/bbs_popularPostWeeklyList?period=week` | DB에 **최근 7일** 게시글이 없음. |
+| **월간** | ML `GET /monthly-top` | ML 데이터 로딩 완료 후에도 해당 기간 게시글 없음. |
+| **추천순** | ML `POST /recommend` | ML 미로딩, 또는 해당 사용자 **활동 데이터 없음**(좋아요/댓글 등 없음) → 200 + 빈 목록 반환. |
+
+- 실시간/주간은 **Spring 백엔드(api.gmss.site)** 가 빈 배열을 반환하면 이 메시지가 나옵니다. DB에 해당 기간 게시글이 있는지 확인하면 됩니다.
+- 추천순은 **testchatpy** 가 503 대신 **200 + 빈 목록**을 반환하도록 바꿔 두었습니다. 오류 대신 "등록된 인기글이 없습니다"만 보이게 됩니다.

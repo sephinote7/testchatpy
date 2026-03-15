@@ -130,8 +130,9 @@ class RecommendationResponse(BaseModel):
 # --- 엔드포인트 ---
 @router.post("/recommend", response_model=RecommendationResponse)
 async def recommend_posts(request: RecommendationRequest):
+    # ML 미로딩/사용자 활동 없음 시 503/404 대신 200 + 빈 목록 → 프론트에서 "등록된 인기글이 없습니다"로 통일
     if bbs is None:
-        raise HTTPException(status_code=503, detail="데이터가 아직 로딩되지 않았습니다.")
+        return RecommendationResponse(user_id=request.user_id, recommendations=[])
     from mlFunctionVersion import (
         compute_user_activity,
         compute_user_vector,
@@ -142,11 +143,11 @@ async def recommend_posts(request: RecommendationRequest):
         request.user_id, like_row, bbs_row, cmt_like_row, comment_row
     )
     if final_result.empty:
-        raise HTTPException(status_code=404, detail="사용자 활동 데이터가 없습니다.")
+        return RecommendationResponse(user_id=request.user_id, recommendations=[])
 
     user_vector = compute_user_vector(final_result, bbs, tfidf_mat)
     if np.linalg.norm(user_vector) == 0:
-        raise HTTPException(status_code=400, detail="유저 벡터 생성 실패")
+        return RecommendationResponse(user_id=request.user_id, recommendations=[])
 
     recommendations = generate_recommendations(
         user_vector, bbs, tfidf_mat, final_result, like_row
