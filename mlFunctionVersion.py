@@ -8,6 +8,7 @@ import pandas as pd
 import psycopg2
 from dotenv import load_dotenv
 from konlpy.tag import Okt
+from urllib.parse import urlparse
 
 # =========================
 # 초기 설정
@@ -38,14 +39,29 @@ def korean_tokenizer(text):
     return [t for t in tokens if t not in STOPWORDS]
 
 def get_db_connection():
+    """Render: DATABASE_URL 우선 사용. 없으면 user/password/host/port/dbname 사용."""
     load_dotenv()
+    raw_url = os.getenv("DATABASE_URL")
+    url = (raw_url.strip() if raw_url else None) or None
     try:
+        if url and "@" in url:
+            return psycopg2.connect(dsn=url)
+        user = os.getenv("user")
+        password = os.getenv("password")
+        host = os.getenv("host")
+        port = os.getenv("port")
+        dbname = os.getenv("dbname")
+        if not all([user, password, host, port, dbname]):
+            raise Exception(
+                "ML DB 연결: Render 환경변수에 DATABASE_URL 또는 user/password/host/port/dbname 을 설정하세요. "
+                "DATABASE_URL 사용 시 형식: postgresql://USER:PASSWORD@HOST:PORT/DBNAME (비밀번호와 호스트 사이에 @ 필수)"
+            )
         return psycopg2.connect(
-            user=os.getenv("user"),
-            password=os.getenv("password"),
-            host=os.getenv("host"),
-            port=os.getenv("port"),
-            dbname=os.getenv("dbname")
+            user=user,
+            password=password,
+            host=host,
+            port=str(port).strip(),
+            dbname=dbname,
         )
     except Exception as e:
         raise Exception(f"DB 연결 실패: {e}")
