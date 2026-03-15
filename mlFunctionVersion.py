@@ -1,7 +1,6 @@
 # 라우터 아님. app.py의 ml_routes.py 및 mlfcForFastAPI.py에서 import하여 사용.
 from ast import literal_eval
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+import warnings
 import numpy as np
 import os
 import pandas as pd
@@ -9,6 +8,8 @@ import psycopg2
 from dotenv import load_dotenv
 from konlpy.tag import Okt
 from urllib.parse import urlparse
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # =========================
 # 초기 설정
@@ -68,7 +69,9 @@ def get_db_connection():
 
 def load_table_as_df(connection, table_name):
     query = f"SELECT * FROM {table_name}"
-    return pd.read_sql(query, connection)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*SQLAlchemy connectable.*", category=UserWarning)
+        return pd.read_sql(query, connection)
 
 # =========================
 # 유저 활동 데이터 처리
@@ -161,13 +164,15 @@ def prepare_bbs_tfidf(bbs_row):
         (bbs_filtered['content'] + " ") * 3
     )
 
-    tfidf_vectorizer = TfidfVectorizer(
-        max_features=2000,
-        min_df=2,
-        ngram_range=(1, 2),
-        tokenizer=korean_tokenizer
-    )
-    tfidf_mat = tfidf_vectorizer.fit_transform(bbs_filtered['embedding'])
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*token_pattern.*", category=UserWarning)
+        tfidf_vectorizer = TfidfVectorizer(
+            max_features=2000,
+            min_df=2,
+            ngram_range=(1, 2),
+            tokenizer=korean_tokenizer
+        )
+        tfidf_mat = tfidf_vectorizer.fit_transform(bbs_filtered['embedding'])
     return bbs_filtered, tfidf_vectorizer, tfidf_mat
 
 # =========================

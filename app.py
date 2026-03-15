@@ -1,4 +1,5 @@
 import os
+import threading
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +9,10 @@ from ml_routes import router as ml_router, load_ml_data
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    load_ml_data()
+    # ML 로딩을 백그라운드로 실행 → 서버가 즉시 포트 바인딩되어 Render 포트 스캔 통과
+    # 로딩 완료 전 /recommend 등은 503 반환
+    t = threading.Thread(target=load_ml_data, daemon=True)
+    t.start()
     yield
 
 app = FastAPI(title="화상채팅 음성 요약 API", lifespan=lifespan)

@@ -1,5 +1,12 @@
 # Render 환경 변수 점검 (testchatpy ML 서비스)
 
+## 포트 바인딩 (No open ports detected 대응)
+
+- 앱은 **ML 데이터를 백그라운드**에서 로드합니다. 서버는 기동 직후 포트를 열어 Render 포트 스캔을 통과합니다.
+- ML 로딩이 끝나기 전에는 `/recommend`, `/weekly-keywords` 등이 503을 반환할 수 있습니다. 수십 초 후 재시도하면 됩니다.
+
+---
+
 ## 필수 환경 변수
 
 | KEY | 필수 | 설명 |
