@@ -8,6 +8,7 @@ import os
 from io import BytesIO
 
 import numpy as np
+from PIL import Image
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -217,10 +218,25 @@ async def weekly_keywords():
     return {"count": len(top_keywords), "keywords": top_keywords}
 
 
+def _placeholder_wordcloud_png():
+    """워드클라우드 미준비 시 200 응답용 placeholder PNG (404 방지, OpaqueResponseBlocking 완화)."""
+    img = Image.new("RGB", (800, 400), color=(248, 250, 252))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+
 @router.get("/weekly-wordcloud")
 async def weekly_wordcloud():
     if weekly_wordcloud_image is None:
-        raise HTTPException(status_code=404, detail="워드클라우드가 없습니다.")
+        # 404 대신 placeholder 반환 → img 태그가 실패하지 않아 OpaqueResponseBlocking/NS_BINDING_ABORTED 완화
+        body = _placeholder_wordcloud_png()
+        return StreamingResponse(
+            body,
+            media_type="image/png",
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
     weekly_wordcloud_image.seek(0)
     return StreamingResponse(
         weekly_wordcloud_image,
