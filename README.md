@@ -1,146 +1,239 @@
-# testchatpy
+# ![로고(마크)](https://crrxqwzygpifxmzxszdz.supabase.co/storage/v1/object/public/site_img/h_logo.png) 고민순삭 (GMSS) – AI/요약/ML 서버 (`testchatpy`)
 
-단일 Render 서버에서 다음 두 가지를 제공합니다.
+`testchatpy`는 고민순삭 서비스의 **AI 상담, 화상/채팅 상담 요약, 사이트 챗봇, ML 통계/추천**을 담당하는 FastAPI 기반 백엔드입니다.  
+단일 Render 서비스(uvicorn `app:app`)에서 다음 기능을 제공합니다.
 
-1. **화상 채팅 음성 요약** — STT(OpenAI Whisper) → gpt-4o-mini 요약  
-2. **AI 상담 채팅** — bot_msg 저장, OpenAI 채팅 완료 (회원 전용, VisualChat 형식 반환)
-
-## API
-
-### ML/통계 API (app.py에 라우터로 포함)
-
-**app.py** 메인 앱에 `ml_routes` 라우터가 포함되어 있어, **같은 서비스(uvicorn app:app)** 하나로 채팅·요약·ML API를 모두 제공합니다.
-
-| Method | 경로 | 설명 |
-|--------|------|------|
-| GET | /weekly-keywords | 최근 7일 게시글 TF-IDF 기반 이번 주 키워드 (응답: `{ count, keywords: [{ keyword, score }] }`) |
-| GET | /weekly-wordcloud | 위 키워드 기반 워드클라우드 이미지 (PNG) |
-| POST | /recommend | body `{ "user_id": "email" }` → 해당 유저 추천 게시글 |
-| GET | /monthly-top | 월간 인기글 |
-
-**의존성**: ML 데이터 로딩 시 PostgreSQL에서 `bbs`, `bbs_like`, `bbs_comment`, `cmt_like` 테이블 필요. `.env`에 `user`, `password`, `host`, `port`, `dbname` 설정. 로딩 실패 시 앱은 그대로 기동하며 ML 경로만 503/빈 응답을 반환합니다.  
-**프론트 연동**: testchat 배포 시 **VITE_FASTAPI_URL**을 이 서비스(예: Render 배포 URL)로 설정하면 게시판 인기/추천/주간 키워드 요청이 이쪽으로 전달됩니다. 미설정 시 요청은 Spring(api.gmss.site)으로 가며 해당 경로가 없으면 프론트에서 빈 데이터로 처리됩니다.
-
-**별도 실행(선택)**: ML만 단독 서비스로 돌리려면 `python mlfcForFastAPI.py` (포트 8000)로 기동할 수 있으며, 동일 라우트를 제공합니다.
-
-### 요약 (기존)
-- `POST /api/summarize` — 음성/영상 파일 업로드 → OpenAI Whisper STT 후 gpt-4o-mini 요약 (webm, mp3, wav 등)
-
-### AI 상담 (회원 전용)
-
-| Method | 경로 | 설명 |
-|--------|------|------|
-| GET | /api/ai/chat/history | AI 상담 목록 조회 (cnsl_tp=3, 반환: cnsl_stat, cnsl_dt, cnsl_start_time, cnsl_end_time, cnsl_title, cnsl_content) |
-| GET | /api/ai/chat/{cnsl_id} | ai_msg 상세 조회 (VisualChat 형식) |
-| POST | /api/ai/chat/{cnsl_id} | body `{"content":"메시지"}` → 사용자 메시지 저장 → OpenAI 응답 저장 후 1건 반환 |
-| POST | /api/ai/chat/{cnsl_id}/summary | 대화 요약 생성 후 ai_msg.summary, cnsl_reg.cnsl_content 저장 |
-| DELETE | /api/ai/chat/{cnsl_id} | AI 상담 삭제 처리 (cnsl_reg.del_yn='Y' 소프트 삭제) |
-
-AI 상담 사용 시 PostgreSQL `DATABASE_URL` 필요. `migrations/001_bot_msg.sql` 로 bot_msg 테이블 생성.
-
-## 로컬 실행
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate   # Windows
-pip install -r requirements.txt
-set OPENAI_API_KEY=...
-uvicorn app:app --reload
-```
-
-## Render 배포
-
-### A) Docker로 배포 (권장 — Java 포함, ML 라우트 동작)
-
-Docker 이미지로 배포하면 Render 기본 Python 환경에 없는 **Java(JVM)**를 포함할 수 있어, **konlpy/Okt** 기반 ML 라우트가 그대로 동작합니다.
-
-**기존 서비스에서 Docker로 전환하기**
-
-이미 Render에 올려 둔 testchatpy(Python 런타임) 서비스가 있다면, 아래만 바꾸면 됩니다.
-
-1. 저장소에 **Dockerfile**과 수정된 **render.yaml**이 `testchatpy` 폴더에 들어 있는지 확인한 뒤 푸시.
-2. [Render Dashboard](https://dashboard.render.com) → 해당 **Web Service** 선택.
-3. 왼쪽 **Settings** 탭에서:
-   - **Environment** → **Runtime**: **Python** 을 **Docker** 로 변경.
-   - (선택) **Build & Deploy**에서 **Dockerfile Path**가 비어 있으면 `Dockerfile`, **Docker Context**가 비어 있으면 `.` 또는 `testchatpy`(저장소 루트가 GMSS일 때는 보통 Root Directory가 이미 `testchatpy`이므로 `.` 로 두면 됨.)
-4. **Manual Deploy** → **Deploy latest commit** 으로 재배포.
-
-이후 빌드가 Dockerfile 기준으로 돌고, 이미지 안에 Java가 포함되어 ML 라우트가 동작합니다. 기존에 넣어 둔 `OPENAI_API_KEY`, `DATABASE_URL` 등 환경 변수는 그대로 쓰입니다. ML 라우트까지 쓰려면 **Environment**에 `user`, `password`, `host`, `port`, `dbname`을 추가하면 됩니다.
-
-**1) Render에서 서비스 생성·연결** (새 서비스일 때)
-
-- [Render](https://render.com) → New → **Web Service**
-- 연결할 저장소 선택 후, **Root Directory**를 `testchatpy`로 설정 (저장소 최상단이 아닌 `testchatpy` 폴더를 서비스 루트로 사용)
-- **Blueprint**로 배포하는 경우에도 동일하게 Root Directory를 `testchatpy`로 두면, 해당 폴더 안의 `render.yaml`이 적용됨
-
-**2) render.yaml 동작**
-
-- `render.yaml`에 `runtime: docker`, `dockerfilePath: ./Dockerfile`이 지정되어 있으면, Render는 **Python 대신 Docker** 런타임으로 빌드·실행함
-- 빌드 시 `testchatpy` 디렉터리 기준으로 `Dockerfile`을 사용해 이미지를 만들고, 그 이미지로 서비스를 띄움
-
-**3) Dockerfile에서 하는 일**
-
-- **베이스 이미지**: `python:3.12-slim-bookworm` (Debian Bookworm 기반 Python 3.12)
-- **시스템 패키지**: `openjdk-17-jre-headless` 설치 → konlpy의 **Okt(Open Korean Text)** 토크나이저가 사용하는 JVM 제공
-- **앱 실행**: `pip install -r requirements.txt` 후 `uvicorn app:app --host 0.0.0.0 --port $PORT` 로 FastAPI 서버 기동 (Render가 부여하는 `PORT` 사용)
-
-**4) 환경 변수**
-
-| 변수 | 필수 여부 | 용도 |
-|------|-----------|------|
-| `OPENAI_API_KEY` | 필수 | OpenAI API 키 (요약·AI 상담) |
-| `DATABASE_URL` | AI 상담 사용 시 필수 | PostgreSQL 연결 문자열. Supabase 사용 시 **Pooler(6543)** URL 권장 |
-| `user` | ML 라우트 사용 시 | PostgreSQL 사용자명 (Supabase: `postgres`) |
-| `password` | ML 라우트 사용 시 | DB 비밀번호 |
-| `host` | ML 라우트 사용 시 | DB 호스트 (Supabase: `xxx.supabase.co`) |
-| `port` | ML 라우트 사용 시 | DB 포트 (Supabase Pooler: `6543`) |
-| `dbname` | ML 라우트 사용 시 | DB 이름 (Supabase: `postgres`) |
-
-- **채팅·요약·AI 상담만** 쓰는 경우: `OPENAI_API_KEY`와 (AI 상담 시) `DATABASE_URL`만 설정하면 됨  
-- **ML 라우트**(`/weekly-keywords`, `/recommend`, `/monthly-top`)까지 쓰는 경우: 위 표의 `user`, `password`, `host`, `port`, `dbname`을 Supabase(또는 사용 중인 PostgreSQL) 값으로 채워야 함. `mlFunctionVersion`의 `get_db_connection()`이 이 변수들을 읽음
-
-### B) 네이티브 Python으로 배포 (Java 미포함)
-
-- 대시보드에서 **Runtime**을 **Python**으로 선택하고, Build Command: `pip install -r requirements.txt`, Start Command: `uvicorn app:app --host 0.0.0.0 --port $PORT` 로 설정.
-- 이 경우 JVM이 없어 **ML 라우트는 비동작**(503/빈 응답)하고, 채팅·요약·AI 상담만 동작합니다.
-
-**53300 연결 슬롯 소진 방지**: Supabase 사용 시 `DATABASE_URL`에 **Pooler URL(포트 6543)** 사용을 권장합니다.  
-Supabase 대시보드 → Settings → Database → Connection string → URI (Transaction pooler)
-
-배포된 URL 하나로:
-- testchat 프론트의 요약 API 주소 → 동일 URL (STT/요약)
-- pjt-gmss 프론트의 `VITE_AI_CHAT_API_URL` → 동일 URL (AI 상담 GET/POST)
+1. **화상/채팅 상담 음성 요약** – STT(OpenAI Whisper) → GPT 요약 → Supabase 저장
+2. **AI 상담 채팅** – `ai_msg`/`bot_msg` 기반 대화 저장 및 OpenAI 응답
+3. **사이트 챗봇(site-chat)** – 고민순삭 홈페이지 이용 안내 전용 챗봇
+4. **ML/통계 API** – 게시판 기반 주간 키워드, 워드클라우드, 추천·인기글
 
 ---
 
-## Render 배포 URL 및 Postman 접근
+## 👥 Who are we?
 
-### 기본 URL
+(공통 팀 구성에서 Python/AI 파트 관련)
+
+- **김태길**
+  - AI 상담, 화상 상담 STT·요약, 텍스트 상담 요약
+  - 사이트 챗봇 API 설계·구현
+  - Supabase / Spring / React와의 연동
+- **박종석**
+  - Supabase 스키마 설계 (`ai_msg`, `chat_msg`, `bbs*` 등)
+  - 통계·추천용 SQL/쿼리 설계
+- **이하늘**
+  - 상담 플로우 요구사항 정의, AI/요약 기능 기획
+- 기타 팀원
+  - 프론트/스프링과의 도메인 모델 협업
+
+---
+
+## 🧩 역할 개요
+
+이 서비스는 **Spring 메인 백엔드(`pjt-gmss-back`)와 Supabase(PostgreSQL)** 사이에서 AI·요약·추천 기능을 담당합니다.
+
+- AI 텍스트 상담(내담자 ↔ AI) – OpenAI Chat 사용
+- 화상/채팅 상담 종료 후 **음성(STT) + 채팅**을 기반으로 요약 생성
+- 텍스트 상담(1:1 채팅) 종료 시 요약 생성
+- 고민순삭 사이트 이용 방법 안내용 사이트 챗봇
+- 게시판 데이터 기반 주간 키워드·워드클라우드·추천글·인기글 제공
+
+---
+
+## 🛠 기술 스택
+
+<div>
+
+<img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white"/>
+<img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white"/>
+<img src="https://img.shields.io/badge/OpenAI_API-412991?style=flat-square&logo=openai&logoColor=white"/>
+<img src="https://img.shields.io/badge/Whisper_STT-000000?style=flat-square"/>
+<img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white"/>
+<img src="https://img.shields.io/badge/Uvicorn-000000?style=flat-square"/>
+
+</div>
+
+- FastAPI
+- PostgreSQL (Supabase DB – `DATABASE_URL` / Pooler 사용)
+- OpenAI Chat (GPT 계열 모델, `ai_openai.py`)
+- OpenAI Whisper STT (음성 인식)
+- Uvicorn (Render / Docker 환경에서 실행)
+- (선택) konlpy + JVM (ML/워드클라우드용)
+
+---
+
+## 📦 주요 모듈 및 기능
+
+### 1. 엔트리포인트 – `app.py`
+
+- FastAPI 앱 생성, CORS 설정
+- ML 데이터 비동기 로딩 (`load_ml_data`)
+- 라우터 등록:
+  - `ai_chat` – AI 상담
+  - `cnsl_chat` – 채팅 상담 API (요약 저장)
+  - `summarize` – STT + 요약
+  - `chatbot` – 사이트 챗봇
+  - `ml_routes` – 주간 키워드, 추천, 인기글 등
+
+---
+
+### 2. AI 상담 – `ai_chat.py`, `ai_openai.py`, `ai_db.py`
+
+**AI 상담은 cnsl_tp=3(AI 상담) 전용이며, Spring + React `AIChat`과 연동됩니다.**
+
+주요 API:
+
+| Method | 경로                             | 설명                                                                  |
+| ------ | -------------------------------- | --------------------------------------------------------------------- |
+| GET    | `/api/ai/chat/history`           | AI 상담 목록 조회 (cnsl_tp=3, `cnsl_reg` 조회)                        |
+| GET    | `/api/ai/chat/{cnsl_id}`         | `ai_msg` 상세 조회 (VisualChat 형식에 맞춘 구조)                      |
+| POST   | `/api/ai/chat/{cnsl_id}`         | 사용자 메시지 저장 → OpenAI 응답 생성·저장 후 1건 반환                |
+| POST   | `/api/ai/chat/{cnsl_id}/summary` | 전체 대화 요약 생성 후 `ai_msg.summary`, `cnsl_reg.cnsl_content` 저장 |
+| DELETE | `/api/ai/chat/{cnsl_id}`         | AI 상담 소프트 삭제 (`cnsl_reg.del_yn='Y'`)                           |
+
+구현 포인트:
+
+- `ai_openai.py`
+  - 공감형 상담사 시스템 프롬프트
+  - MBTI / persona 정보를 받아 톤·조언 스타일 조정
+- `ai_db.py`
+  - `ai_msg` 테이블에 `msg_data.content`(speaker, text, timestamp) 리스트 구조로 저장
+  - `member` / `cnsl_reg`와 조인해 접근 제어
+
+> **필수 환경변수**: `OPENAI_API_KEY`, `DATABASE_URL` (Supabase Pooler URL 권장)
+
+---
+
+### 3. 채팅 상담·요약 – `cnsl_chat.py`, `chat_msg_db.py`, `summarize.py`
+
+#### 3-1. 채팅 API (`cnsl_chat.py`)
+
+| Method | 경로                                    | 설명                                                       |
+| ------ | --------------------------------------- | ---------------------------------------------------------- |
+| GET    | `/api/cnsl/{cnsl_id}/chat`              | 채팅 메시지 목록을 프론트가 사용하기 쉬운 형식으로 flatten |
+| POST   | `/api/cnsl/{cnsl_id}/chat`              | 메시지 추가 (`msg_data.content`에 append)                  |
+| PATCH  | `/api/cnsl/{cnsl_id}/stat`              | 상담 상태 C/D 업데이트                                     |
+| POST   | `/api/cnsl/{cnsl_id}/chat/summary-full` | 요약/요약문/최종 msg_data를 Supabase에 저장                |
+
+`chat_msg_db.py`에서 `chat_msg`, `cnsl_reg`에 접근하여 content 병합 및 정렬을 수행합니다.
+
+#### 3-2. 요약 API (`summarize.py`)
+
+- `POST /api/summarize`
+  - **입력**
+    - `audio_user`: 사용자 음성(webm 등)
+    - `audio_cnsler`: 상담사 음성
+    - `msg_data`: 기존 채팅 로그(JSON string)
+  - **처리**
+    1. Whisper STT로 화자별 텍스트 + timestamp 생성
+    2. STT 결과를 한번 더 LLM으로 정제(불필요한 잡음 제거)
+    3. 채팅 + STT를 합쳐 시간순 대화 로그로 정렬
+    4. GPT로 `summary` / `summary_line` 생성 (길이 제한 포함)
+  - **출력**
+    - `transcript` (선택)
+    - `summary` (250자 이내)
+    - `summary_line` (한 줄 요약)
+    - `msg_data` (최종 대화 로그 리스트)
+
+VisualChat / CounselorChat은 이 결과를 `/api/cnsl/{id}/chat/summary-full`로 Supabase에 저장합니다.
+
+---
+
+### 4. 사이트 챗봇 – `chatbot.py`
+
+- `POST /api/site-chat`
+  - 입력: `{ message, history[], siteContext[], source? }`
+  - 출력: `{ answer, summary }`
+  - 역할: 고민순삭 홈페이지 UI(메뉴 위치, 이용 방법, 기능 설명 등) 안내 전용 챗봇
+
+React `FloatingChatbot` 컴포넌트에서 이 API를 호출해  
+“순삭이” 챗봇 대화와 요약을 제공합니다.
+
+---
+
+### 5. ML/통계 API – `ml_routes.py` 등
+
+`app.py`에 ML 라우터가 포함되어 있어 같은 서비스에서 동작합니다.
+
+| Method | 경로                | 설명                                                                                     |
+| ------ | ------------------- | ---------------------------------------------------------------------------------------- |
+| GET    | `/weekly-keywords`  | 최근 7일 게시글 TF-IDF 기반 이번 주 키워드 (`{ count, keywords: [{ keyword, score }] }`) |
+| GET    | `/weekly-wordcloud` | 위 키워드 기반 워드클라우드 이미지 (PNG)                                                 |
+| POST   | `/recommend`        | `{ \"user_id\": \"email\" }` → 해당 유저 추천 게시글                                     |
+| GET    | `/monthly-top`      | 월간 인기글                                                                              |
+
+- 의존성: `bbs`, `bbs_like`, `bbs_comment`, `cmt_like` 테이블
+- DB 접속: `.env`의 `user`, `password`, `host`, `port`, `dbname`
+- 로딩 실패 시: 앱은 기동되며 ML 경로만 503/빈 응답
+
+별도로 ML만 띄우고 싶다면 `python mlfcForFastAPI.py`(포트 8000)를 사용할 수 있습니다.
+
+---
+
+## 🔌 API 정리 (요약)
+
+### 요약 API
+
+- `POST /api/summarize` – 음성/채팅 기반 상담 요약
+
+### AI 상담 API
+
+- `GET /api/ai/chat/history`
+- `GET /api/ai/chat/{cnsl_id}`
+- `POST /api/ai/chat/{cnsl_id}`
+- `POST /api/ai/chat/{cnsl_id}/summary`
+- `DELETE /api/ai/chat/{cnsl_id}`
+
+### 채팅 상담 API
+
+- `GET /api/cnsl/{cnsl_id}/chat`
+- `POST /api/cnsl/{cnsl_id}/chat`
+- `PATCH /api/cnsl/{cnsl_id}/stat`
+- `POST /api/cnsl/{cnsl_id}/chat/summary-full`
+
+### 사이트 챗봇 API
+
+- `POST /api/site-chat`
+
+### ML/통계 API
+
+- `GET /weekly-keywords`
+- `GET /weekly-wordcloud`
+- `POST /recommend`
+- `GET /monthly-top`
+
+---
+
+## ⚙ 환경 변수
+
+| 변수                                             | 필수                 | 용도                                               |
+| ------------------------------------------------ | -------------------- | -------------------------------------------------- |
+| `OPENAI_API_KEY`                                 | 필수                 | OpenAI API 키 (요약·AI 상담·챗봇)                  |
+| `DATABASE_URL`                                   | AI 상담 사용 시 필수 | PostgreSQL 연결 문자열 (Supabase Pooler 6543 권장) |
+| `user` / `password` / `host` / `port` / `dbname` | ML 라우트 사용 시    | 게시판·댓글 통계/추천용 DB 접속 정보               |
+
+- **채팅/요약/AI 상담만** 사용할 경우: `OPENAI_API_KEY`, `DATABASE_URL`만 설정
+- **ML 라우트까지** 사용할 경우: 위 5개 변수도 설정 (Supabase 값 사용)
+
+---
+
+## 🖥 로컬 실행
+
+```bash
+cd testchatpy
+
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# macOS/Linux
+# source .venv/bin/activate
+
+pip install -r requirements.txt
+
+# 환경 변수 설정
+set OPENAI_API_KEY=...          # Windows
+# export OPENAI_API_KEY=...     # macOS/Linux
+
+uvicorn app:app --reload
+# 기본: http://localhost:8000
 ```
-https://testchatpy.onrender.com
-```
-
-### Postman에서 테스트하는 방법
-
-1. **Base URL 설정**
-   - Postman에서 Environment 또는 Collection Variables 생성
-   - `base_url` = `https://testchatpy.onrender.com`
-
-2. **AI 상담 API 요청 시 필수 헤더**
-   | 헤더 | 값 | 설명 |
-   |------|-----|------|
-   | Query `member_id` | 회원 이메일(member_id) | 회원 식별 (예: `user@example.com`) |
-
-3. **요청 예시 (AI 상담)**
-   - **GET** `{{base_url}}/api/ai/chat/history` — AI 상담 목록
-   - **GET** `{{base_url}}/api/ai/chat/{cnsl_id}` — 상세 메시지
-   - **POST** `{{base_url}}/api/ai/chat/{cnsl_id}` — Body: `{"content":"메시지"}`
-   - **POST** `{{base_url}}/api/ai/chat/{cnsl_id}/summary` — 요약 생성
-   - **DELETE** `{{base_url}}/api/ai/chat/{cnsl_id}` — 삭제
-
-4. **요약 API**
-   - **POST** `{{base_url}}/api/summarize` — multipart/form-data (audio_user, audio_cnsler, msg_data)
-
-5. **참고**
-   - Render 무료 플랜: 15분 미사용 시 슬립 → 첫 요청 시 약 30~60초 지연 가능
-   - 헬스 체크: `GET /` → `{"status":"running"}`
